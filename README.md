@@ -41,3 +41,37 @@ PYTHON_BIN=/path/to/venv/bin/python ./scripts/run-local-checks.sh
 ```bash
 uvicorn chatdba.app.main:app --reload
 ```
+
+## DingTalk E2E Flow
+
+Phase 1 now includes an in-process DingTalk message handling contract:
+
+```text
+DingTalkInboundMessage
+  -> DingTalkSqlOptimizationHandler
+  -> OptimizationTaskService
+  -> run_sql_optimization_task
+  -> StreamingProgressBridge
+  -> DingTalkResponder
+```
+
+For local tests, DingTalk sending is represented by an injectable sender object.
+Production DingTalk Stream wiring should provide a sender that calls the DingTalk
+session webhook or official SDK.
+
+Accepted message examples:
+
+```text
+SQL优化
+select * from orders where user_id = 100;
+```
+
+```text
+优化 select * from orders where user_id = 100;
+```
+
+````text
+```sql
+select * from orders where user_id = 100;
+```
+````
