@@ -9,8 +9,12 @@ class FakeChunk:
 class FakeCompletions:
     def create(self, **kwargs):
         assert kwargs["model"] == "qwen-plus"
+        assert kwargs["messages"] == [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "user"},
+        ]
         assert kwargs["stream"] is True
-        return [FakeChunk("hello"), FakeChunk(" world")]
+        return [FakeChunk("hello"), FakeChunk(""), FakeChunk(" world")]
 
 
 class FakeClient:
