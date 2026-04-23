@@ -19,7 +19,10 @@ def extract_plan_features(explain_json: dict[str, object]) -> list[PlanFeature]:
     features: list[PlanFeature] = []
     for table_node in _walk(explain_json):
         access_type = table_node.get("access_type")
-        rows = int(table_node.get("rows_examined_per_scan") or table_node.get("rows_produced_per_join") or 0)
+        rows_examined_per_scan = table_node.get("rows_examined_per_scan")
+        if rows_examined_per_scan is None:
+            continue
+        rows = int(rows_examined_per_scan)
         if access_type == "ALL" and rows >= 10000:
             features.append(
                 PlanFeature(
@@ -29,4 +32,3 @@ def extract_plan_features(explain_json: dict[str, object]) -> list[PlanFeature]:
                 )
             )
     return features
-
