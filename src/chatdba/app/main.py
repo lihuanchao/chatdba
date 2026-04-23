@@ -1,4 +1,13 @@
+from uuid import uuid4
+
 from fastapi import FastAPI
+from pydantic import BaseModel
+
+from chatdba.domain.models import TaskStatus
+
+
+class CreateOptimizationTaskRequest(BaseModel):
+    raw_sql: str
 
 
 def create_app() -> FastAPI:
@@ -7,6 +16,13 @@ def create_app() -> FastAPI:
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "service": "chatdba"}
+
+    @app.post("/internal/tasks/sql-optimization", status_code=202)
+    def create_sql_optimization_task(
+        request: CreateOptimizationTaskRequest,
+    ) -> dict[str, str]:
+        _ = request
+        return {"task_id": str(uuid4()), "status": TaskStatus.RECEIVED}
 
     return app
 
