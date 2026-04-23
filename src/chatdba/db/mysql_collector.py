@@ -23,23 +23,43 @@ class MysqlEvidence(BaseModel):
     create_tables: dict[str, str] = Field(default_factory=dict)
 
 
+def _parse_explain_payload(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (str, bytes, bytearray)):
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise TypeError(
+                f"Expected EXPLAIN payload to decode to a dict, got {type(parsed).__name__}"
+            )
+        return parsed
+    raise TypeError(
+        "Expected EXPLAIN payload as dict, str, bytes, or bytearray; "
+        f"got {type(value).__name__}"
+    )
+
+
+def _quote_mysql_identifier(identifier: str) -> str:
+    return f"`{identifier.replace('`', '``')}`"
+
+
 class MysqlEvidenceCollector:
     def __init__(self, client: MysqlClient) -> None:
         self._client = client
 
     def collect(self, sql: str, tables: list[MysqlTableTarget]) -> MysqlEvidence:
         explain_row = self._client.query_one(f"EXPLAIN FORMAT=JSON {sql}")
-        explain_raw = str(explain_row["EXPLAIN"])
         create_tables: dict[str, str] = {}
 
         for table in tables:
             row = self._client.query_one(
-                f"SHOW CREATE TABLE `{table.schema_name}`.`{table.table_name}`"
+                "SHOW CREATE TABLE "
+                f"{_quote_mysql_identifier(table.schema_name)}."
+                f"{_quote_mysql_identifier(table.table_name)}"
             )
             create_tables[table.qualified_name] = str(row["Create Table"])
 
         return MysqlEvidence(
-            explain_json=json.loads(explain_raw),
+            explain_json=_parse_explain_payload(explain_row["EXPLAIN"]),
             create_tables=create_tables,
         )
-
