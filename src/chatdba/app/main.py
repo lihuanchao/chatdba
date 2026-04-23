@@ -10,6 +10,11 @@ class CreateOptimizationTaskRequest(BaseModel):
     raw_sql: str
 
 
+class CreateOptimizationTaskResponse(BaseModel):
+    task_id: str
+    status: TaskStatus
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ChatDBA", version="0.1.0")
 
@@ -17,12 +22,19 @@ def create_app() -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok", "service": "chatdba"}
 
-    @app.post("/internal/tasks/sql-optimization", status_code=202)
+    @app.post(
+        "/internal/tasks/sql-optimization",
+        status_code=202,
+        response_model=CreateOptimizationTaskResponse,
+    )
     def create_sql_optimization_task(
         request: CreateOptimizationTaskRequest,
-    ) -> dict[str, str]:
+    ) -> CreateOptimizationTaskResponse:
         _ = request
-        return {"task_id": str(uuid4()), "status": TaskStatus.RECEIVED}
+        return CreateOptimizationTaskResponse(
+            task_id=str(uuid4()),
+            status=TaskStatus.RECEIVED,
+        )
 
     return app
 
