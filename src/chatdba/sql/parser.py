@@ -12,11 +12,23 @@ def _fingerprint(sql: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _is_within_cte_definition(table: exp.Table) -> bool:
+    node = table.parent
+    while node is not None:
+        if isinstance(node, exp.CTE):
+            return True
+        node = node.parent
+    return False
+
+
 def parse_sql_features(raw_sql: str) -> SqlFeatures:
     sql = validate_select_only(raw_sql)
     expression = sqlglot.parse_one(sql, read="mysql")
+    cte_names = {cte.alias_or_name for cte in expression.find_all(exp.CTE)}
     tables: list[TableReference] = []
     for table in expression.find_all(exp.Table):
+        if table.name in cte_names and not _is_within_cte_definition(table):
+            continue
         tables.append(
             TableReference(
                 schema_name=table.db or None,
