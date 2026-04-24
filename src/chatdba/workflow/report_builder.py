@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 from typing import Protocol
 
 from chatdba.cases.repository import OptimizationCase
@@ -16,6 +18,16 @@ from chatdba.domain.report_schema import (
     Risk,
     SimilarCase,
     SqlRewrite,
+)
+
+DEFAULT_SYSTEM_PROMPT = (
+    "你是资深 MySQL DBA，请根据结构化证据输出 SQL优化报告。"
+    "必须返回合法 JSON，并包含置信度、证据状态、瓶颈、SQL 改写、索引建议、风险和验证步骤。"
+)
+PROMPT_FILE = (
+    Path(__file__).resolve().parent.parent
+    / "prompts"
+    / "sql_optimization_report_prompt_zh.md"
 )
 
 
@@ -71,10 +83,7 @@ class OptimizationReportComposer:
         evidence: EvidenceEnvelope,
         findings: list[RuleFinding],
     ) -> OptimizationReport | None:
-        system_prompt = (
-            "你是资深 MySQL DBA，请根据结构化证据输出 SQL优化报告。"
-            "必须返回合法 JSON，并包含置信度、证据状态、瓶颈、SQL 改写、索引建议、风险和验证步骤。"
-        )
+        system_prompt = _load_system_prompt()
         similar_cases = self._select_cases(sql_features)
         user_prompt = json.dumps(
             {
@@ -161,9 +170,9 @@ class OptimizationReportComposer:
     def _limitations_for(self, evidence: EvidenceEnvelope) -> list[str]:
         limitations = list(evidence.collection_errors)
         if evidence.status == EvidenceStatus.SQL_ONLY:
-            limitations.insert(0, "No source execution evidence was available.")
+            limitations.insert(0, "未获取到源库执行证据，报告基于 SQL 文本、规则和历史案例生成。")
         elif evidence.status == EvidenceStatus.PARTIAL:
-            limitations.insert(0, "Only partial source evidence was available.")
+            limitations.insert(0, "仅获取到部分源库证据，建议补齐后再执行变更。")
         return limitations
 
     def _build_summary(
@@ -174,24 +183,37 @@ class OptimizationReportComposer:
         if findings:
             return findings[0].message
         if status == EvidenceStatus.SQL_ONLY:
-            return "The report is based on SQL text, rules, and historical cases."
+            return "当前为 SQL-only 分析：基于 SQL 文本、规则与历史案例给出优化建议。"
         if status == EvidenceStatus.PARTIAL:
-            return "The report is based on partial source evidence plus SQL rules."
-        return "The report is based on source execution evidence and SQL rules."
+            return "当前为部分证据分析：结合已采集证据与 SQL 规则给出优化建议。"
+        return "当前为完整证据分析：基于执行计划、表结构与 SQL 规则生成建议。"
 
     def _build_sql_rewrites(
         self,
         raw_sql: str,
         findings: list[RuleFinding],
     ) -> list[SqlRewrite]:
+        sql = raw_sql.strip().rstrip(";")
         if any(finding.code == "limit_with_order_by" for finding in findings):
             return [
                 SqlRewrite(
-                    title="Review projection and predicate selectivity",
-                    sql=raw_sql,
+                    title="减少返回列并保持排序列可走索引",
+                    sql=_rewrite_select_star(sql),
                 )
             ]
-        return []
+        if re.search(r"^\s*select\s+\*", raw_sql, flags=re.IGNORECASE):
+            return [
+                SqlRewrite(
+                    title="避免 SELECT *，只返回必要列",
+                    sql=_rewrite_select_star(sql),
+                )
+            ]
+        return [
+            SqlRewrite(
+                title="保持语义不变的可读性重写",
+                sql=sql,
+            )
+        ]
 
     def _build_index_recommendations(
         self,
@@ -205,18 +227,24 @@ class OptimizationReportComposer:
             table_name = sql_features.tables[0].table_name if sql_features.tables else "target_table"
             return [
                 IndexRecommendation(
-                    ddl=f"create index idx_{table_name}_{order_column.lower()} on {table_name}({order_column})",
+                    ddl=f"CREATE INDEX idx_{table_name}_{order_column.lower()} ON {table_name}({order_column});",
                     risk="medium",
                 )
             ]
-        return []
+        table_name = sql_features.tables[0].table_name if sql_features.tables else "target_table"
+        return [
+            IndexRecommendation(
+                ddl=f"CREATE INDEX idx_{table_name}_opt ON {table_name}(<where_col1>, <where_col2>);",
+                risk="medium",
+            )
+        ]
 
     def _build_risks(self, status: EvidenceStatus) -> list[Risk]:
         if status == EvidenceStatus.SQL_ONLY:
             return [
                 Risk(
                     level="medium",
-                    description="Recommendations are inferred without source execution evidence.",
+                    description="当前建议未经过源库执行计划验证，请先在测试环境验证后上线。",
                 )
             ]
         return []
@@ -224,12 +252,33 @@ class OptimizationReportComposer:
     def _build_validation_steps(self, status: EvidenceStatus) -> list[str]:
         if status == EvidenceStatus.FULL:
             return [
-                "Run EXPLAIN FORMAT=JSON on the rewritten SQL and compare access paths.",
+                "对重写 SQL 执行 EXPLAIN FORMAT=JSON，确认访问路径和预估行数改善。",
             ]
         if status == EvidenceStatus.PARTIAL:
             return [
-                "Re-run the missing evidence collection on the target database before applying changes.",
+                "先补齐缺失证据（EXPLAIN/DDL），再评审并执行索引或 SQL 变更。",
             ]
         return [
-            "Validate the SQL against the target source database before applying any recommendation.",
+            "先在目标库测试环境执行 EXPLAIN 与回归测试，再决定是否上线。",
         ]
+
+
+def _rewrite_select_star(sql: str) -> str:
+    rewritten = re.sub(
+        r"^\s*select\s+\*",
+        "SELECT <必要列>",
+        sql,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return rewritten if rewritten else sql
+
+
+def _load_system_prompt() -> str:
+    try:
+        content = PROMPT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return DEFAULT_SYSTEM_PROMPT
+    if not content:
+        return DEFAULT_SYSTEM_PROMPT
+    return content

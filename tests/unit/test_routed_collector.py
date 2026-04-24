@@ -101,7 +101,7 @@ def test_routed_collector_preserves_sql_only_when_router_cannot_route():
             EvidenceEnvelope(
                 status=EvidenceStatus.SQL_ONLY,
                 missing_evidence=["route_info", "explain_json", "create_table"],
-                collection_errors=["No metadata route found for one or more tables."],
+                collection_errors=["元数据库未找到一个或多个表的路由信息。"],
             )
         ),
         connection_factory=FakeConnectionFactory(SuccessfulMysqlClient()),
@@ -114,4 +114,4 @@ def test_routed_collector_preserves_sql_only_when_router_cannot_route():
 
     assert evidence.status == EvidenceStatus.SQL_ONLY
     assert evidence.route is None
-    assert "No metadata route found" in evidence.collection_errors[0]
+    assert "未找到一个或多个表的路由信息" in evidence.collection_errors[0]

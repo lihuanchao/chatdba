@@ -2,7 +2,7 @@ import importlib
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
-from chatdba.dingtalk.channel import DingTalkInboundMessage
+from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_template_id_and_clean_text
 
 
 class DingTalkSdkImportError(RuntimeError):
@@ -48,13 +48,16 @@ class DingTalkStreamChatbotHandler:
         text = ""
         if isinstance(text_payload, dict):
             text = str(text_payload.get("content", "")).strip()
+        card_template_id, cleaned_text = extract_template_id_and_clean_text(text)
 
         message = DingTalkInboundMessage(
             message_id=str(callback_data.get("msgId", "")),
             conversation_id=str(callback_data.get("conversationId", "")),
             sender_id=str(callback_data.get("senderId", "")),
-            text=text,
+            text=cleaned_text,
             session_webhook=_as_optional_string(callback_data.get("sessionWebhook")),
+            callback_data=callback_data,
+            card_template_id=card_template_id,
         )
         return self._handler.handle(message)
 

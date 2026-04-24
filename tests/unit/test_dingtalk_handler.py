@@ -23,6 +23,9 @@ class RecordingResponder:
             ok=True,
         )
 
+    def finish_stream(self, message, *, failed=False):
+        return None
+
 
 class SuccessfulTaskService:
     def __init__(self):
@@ -55,7 +58,7 @@ class SuccessfulTaskService:
                             "create_table",
                         ],
                         "limitations": [
-                            "No source execution evidence was available."
+                            "未获取到源库执行证据，报告基于 SQL 文本、规则和历史案例生成。"
                         ],
                         "bottlenecks": [
                             {
@@ -67,7 +70,7 @@ class SuccessfulTaskService:
                         "index_recommendations": [],
                         "risks": [],
                         "validation_steps": [
-                            "Validate the SQL against the target source database before applying any recommendation."
+                            "先在目标库测试环境执行 EXPLAIN 与回归测试，再决定是否上线。"
                         ],
                         "similar_cases": [],
                     }
@@ -129,9 +132,11 @@ def test_handler_runs_task_and_sends_start_progress_and_report():
     assert service.calls[0]["raw_sql"] == "select * from orders"
     assert service.calls[0]["dingtalk_context"].conversation_id == "conv-1"
     assert responder.messages[0] == SQL_OPTIMIZATION_STARTED_MESSAGE
-    assert responder.messages[1] == "Parsing SQL\n"
-    assert "Evidence: SQL_ONLY" in responder.messages[-1]
-    assert "Use an index to avoid filesort." in responder.messages[-1]
+    full_stream_text = "".join(responder.messages[1:])
+    assert "Parsing SQL" in full_stream_text
+    assert "# SQL优化报告" in full_stream_text
+    assert "## SQL重写建议" in full_stream_text
+    assert "## 索引推荐" in full_stream_text
 
 
 def test_handler_sends_failure_message_when_task_fails():

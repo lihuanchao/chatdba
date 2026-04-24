@@ -68,6 +68,45 @@ def make_sdk_bundle() -> DingTalkSdkBundle:
     )
 
 
+def make_sdk_bundle_with_card_streaming() -> DingTalkSdkBundle:
+    class FakeAIMarkdownCardInstance:
+        def __init__(self, dingtalk_client, incoming_message):
+            self.dingtalk_client = dingtalk_client
+            self.incoming_message = incoming_message
+
+        def set_title_and_logo(self, title, logo):
+            return None
+
+        def ai_start(self):
+            return None
+
+        def ai_streaming(self, markdown, append=False):
+            return None
+
+        def ai_finish(self, markdown=None, button_list=None, tips=""):
+            return None
+
+        def ai_fail(self):
+            return None
+
+    class FakeChatbotMessageWithFromDict:
+        TOPIC = "/v1.0/im/bot/messages/get"
+
+        @classmethod
+        def from_dict(cls, data):
+            return data
+
+    stream_module = SimpleNamespace(
+        Credential=FakeCredential,
+        DingTalkStreamClient=FakeClient,
+        AckMessage=FakeAckMessage,
+        ChatbotHandler=FakeChatbotHandler,
+        AIMarkdownCardInstance=FakeAIMarkdownCardInstance,
+    )
+    chatbot_module = SimpleNamespace(ChatbotMessage=FakeChatbotMessageWithFromDict)
+    return DingTalkSdkBundle(stream_module=stream_module, chatbot_module=chatbot_module)
+
+
 def make_settings():
     return SimpleNamespace(
         dingtalk_client_id="client-id",
@@ -120,7 +159,7 @@ def test_build_runtime_uses_sql_only_collector_when_none_is_provided():
 
     assert envelope.status.value == "sql_only"
     assert envelope.collection_errors == [
-        "Metadata routing is not configured for this runtime."
+        "当前未配置元数据库路由，系统将退化为 SQL-only 分析。"
     ]
 
 
@@ -178,3 +217,12 @@ def test_registered_sdk_callback_handler_acks_even_when_routing_is_not_configure
 
     assert status == "OK"
     assert message == "OK"
+
+
+def test_build_runtime_defaults_to_card_streaming_sender_when_sdk_supports_it():
+    runtime = build_dingtalk_runtime(
+        settings=make_settings(),
+        sdk_bundle=make_sdk_bundle_with_card_streaming(),
+    )
+
+    assert runtime.sender.__class__.__name__ == "DingTalkCardStreamingSender"

@@ -15,8 +15,12 @@ SQL_OPTIMIZATION_USAGE_MESSAGE = (
     "SQL优化\n"
     "select * from orders where user_id = 100;"
 )
-SQL_OPTIMIZATION_STARTED_MESSAGE = "已收到 SQL 优化请求，开始分析执行计划和元数据。"
+SQL_OPTIMIZATION_STARTED_MESSAGE = (
+    "## SQL优化任务已接收\n"
+    "正在分析执行计划和元数据，请稍候...\n\n"
+)
 SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX = "SQL 优化任务失败："
+REPORT_STREAM_CHUNK_SIZE = 320
 
 
 class OptimizationTaskServiceProtocol(Protocol):
@@ -62,7 +66,7 @@ class DingTalkSqlOptimizationHandler:
             return DingTalkHandleResult(
                 accepted=False,
                 status=TaskStatus.FAILED,
-                error="empty sql",
+                error="未识别到 SQL",
                 send_results=send_results,
             )
 
@@ -97,6 +101,9 @@ class DingTalkSqlOptimizationHandler:
                     f"{SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX}{error}",
                 )
             )
+            finish_result = self._responder.finish_stream(message, failed=True)
+            if finish_result is not None:
+                send_results.append(finish_result)
             return DingTalkHandleResult(
                 accepted=True,
                 status=TaskStatus.FAILED,
@@ -104,17 +111,19 @@ class DingTalkSqlOptimizationHandler:
                 send_results=send_results,
             )
 
-        bridge.finish()
-        send_results.extend(bridge.send_results)
-
         if execution.status == TaskStatus.FAILED:
-            error = execution.error or "unknown error"
+            bridge.finish()
+            send_results.extend(bridge.send_results)
+            error = execution.error or "未知错误"
             send_results.append(
                 self._responder.reply_text(
                     message,
                     f"{SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX}{error}",
                 )
             )
+            finish_result = self._responder.finish_stream(message, failed=True)
+            if finish_result is not None:
+                send_results.append(finish_result)
             return DingTalkHandleResult(
                 accepted=True,
                 task_id=execution.task_id,
@@ -124,9 +133,14 @@ class DingTalkSqlOptimizationHandler:
             )
 
         report = execution.result["report"]
-        send_results.append(
-            self._responder.reply_text(message, render_report_for_dingtalk(report))
-        )
+        markdown_report = render_report_for_dingtalk(report)
+        for chunk in _iter_markdown_chunks(markdown_report):
+            bridge.emit_now(chunk)
+        bridge.finish()
+        send_results.extend(bridge.send_results)
+        finish_result = self._responder.finish_stream(message, failed=False)
+        if finish_result is not None:
+            send_results.append(finish_result)
         return DingTalkHandleResult(
             accepted=True,
             task_id=execution.task_id,
@@ -140,3 +154,20 @@ def _safe_error_message(exc: Exception) -> str:
     if message:
         return message
     return exc.__class__.__name__
+
+
+def _iter_markdown_chunks(markdown: str) -> list[str]:
+    text = markdown.strip()
+    if not text:
+        return []
+
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(current) + len(line) > REPORT_STREAM_CHUNK_SIZE and current:
+            chunks.append(current)
+            current = ""
+        current += line
+    if current:
+        chunks.append(current)
+    return chunks

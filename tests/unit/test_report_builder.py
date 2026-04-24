@@ -6,7 +6,7 @@ from chatdba.domain.models import (
     RuleFinding,
     SqlFeatures,
 )
-from chatdba.workflow.report_builder import OptimizationReportComposer
+from chatdba.workflow.report_builder import OptimizationReportComposer, _load_system_prompt
 
 
 def test_report_builder_creates_sql_only_report_without_qwen():
@@ -39,7 +39,7 @@ def test_report_builder_creates_sql_only_report_without_qwen():
     assert report.task_id == "task-1"
     assert report.evidence_status == EvidenceStatus.SQL_ONLY
     assert report.confidence_label == ConfidenceLabel.LOW
-    assert "No source execution evidence was available." in report.limitations[0]
+    assert "未获取到源库执行证据" in report.limitations[0]
 
 
 def test_report_builder_uses_cases_and_qwen_json_when_available():
@@ -97,3 +97,10 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
 
     assert report.summary == "Use an index to avoid filesort."
     assert report.similar_cases[0].case_id == "case-1"
+
+
+def test_report_builder_loads_markdown_system_prompt_file():
+    prompt = _load_system_prompt()
+
+    assert "# ChatDBA SQL优化报告生成提示词（中文）" in prompt
+    assert "仅返回合法 JSON" in prompt

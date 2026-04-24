@@ -58,3 +58,17 @@ def test_progress_bridge_finish_force_flushes_remaining_chunks():
     bridge.finish()
 
     assert responder.messages == ["Generated diagnostic findings\n"]
+
+
+def test_progress_bridge_emit_now_flushes_immediately():
+    responder = RecordingResponder()
+    bridge = StreamingProgressBridge(
+        responder=responder,
+        message=make_message(),
+        interval_ms=10_000,
+        clock_ms=lambda: 0,
+    )
+
+    bridge.emit_now("# SQL优化报告\n")
+
+    assert responder.messages == ["# SQL优化报告\n"]

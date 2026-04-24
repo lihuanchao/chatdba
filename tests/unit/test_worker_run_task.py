@@ -58,7 +58,7 @@ def test_run_sql_optimization_task_emits_progress(monkeypatch):
 
     assert result["result"] == "ok"
     assert events == [
-        "Parsing SQL\n",
-        "Generated diagnostic findings\n",
-        "Built optimization report\n",
+        "正在解析 SQL...\n",
+        "已生成诊断结论...\n",
+        "已生成优化报告...\n",
     ]

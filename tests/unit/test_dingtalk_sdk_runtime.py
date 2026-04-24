@@ -44,6 +44,8 @@ def test_sdk_handler_maps_callback_data_to_inbound_message():
     assert app_handler.message.sender_id == "user-1"
     assert app_handler.message.session_webhook == "https://example.test/webhook"
     assert app_handler.message.text == "SQL优化 select * from orders"
+    assert app_handler.message.callback_data["msgId"] == "msg-1"
+    assert app_handler.message.card_template_id is None
 
 
 def test_sdk_handler_uses_empty_text_for_non_text_payload():
@@ -62,6 +64,25 @@ def test_sdk_handler_uses_empty_text_for_non_text_payload():
     )
 
     assert app_handler.message.text == ""
+
+
+def test_sdk_handler_extracts_template_id_from_text_payload():
+    app_handler = RecordingHandler()
+    adapter = DingTalkStreamChatbotHandler(handler=app_handler)
+
+    adapter.handle_callback_data(
+        {
+            "msgId": "msg-3",
+            "conversationId": "conv-1",
+            "senderId": "user-1",
+            "sessionWebhook": "https://example.test/webhook",
+            "msgtype": "text",
+            "text": {"content": "模板ID: my-template\nSQL优化 select * from orders"},
+        }
+    )
+
+    assert app_handler.message.card_template_id == "my-template"
+    assert app_handler.message.text == "SQL优化 select * from orders"
 
 
 def test_load_dingtalk_stream_sdk_raises_clear_error():

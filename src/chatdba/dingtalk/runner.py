@@ -1,3 +1,5 @@
+import logging
+
 from chatdba.dingtalk.runtime import build_dingtalk_runtime
 
 try:
@@ -8,8 +10,21 @@ except ImportError as exc:
 else:
     _SETTINGS_IMPORT_ERROR = None
 
+LOGGER = logging.getLogger(__name__)
+
+
+def _ensure_logging() -> None:
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)-8s %(message)s [%(filename)s:%(lineno)d]",
+    )
+
 
 def main() -> None:
+    _ensure_logging()
     if Settings is None:
         raise SystemExit(
             "ChatDBA settings dependencies are not installed. "
@@ -27,6 +42,7 @@ def main() -> None:
         )
 
     runtime = build_dingtalk_runtime(settings=settings)
+    LOGGER.info("ChatDBA DingTalk runtime started.")
     runtime.start()
 
 

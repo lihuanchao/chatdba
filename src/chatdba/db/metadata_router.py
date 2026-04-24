@@ -96,7 +96,7 @@ class MetadataRouter:
             return EvidenceEnvelope(
                 status=EvidenceStatus.SQL_ONLY,
                 missing_evidence=["route_info", "explain_json", "create_table"],
-                collection_errors=["No metadata route found for one or more tables."],
+                collection_errors=["元数据库未找到一个或多个表的路由信息。"],
             )
 
         if any(not row.enabled for row in rows):
@@ -105,7 +105,7 @@ class MetadataRouter:
                 status=EvidenceStatus.SQL_ONLY,
                 missing_evidence=["route_info", "explain_json", "create_table"],
                 collection_errors=[
-                    f"Source instance is disabled in metadata routing: {', '.join(disabled)}."
+                    f"元数据库中源实例已禁用：{', '.join(disabled)}。"
                 ],
             )
 
@@ -115,7 +115,7 @@ class MetadataRouter:
                 status=EvidenceStatus.SQL_ONLY,
                 missing_evidence=["route_info", "explain_json", "create_table"],
                 collection_errors=[
-                    "SQL references multiple source instances and cannot be routed to a single source database."
+                    "SQL 涉及多个源实例，当前无法路由到单一源库执行证据采集。"
                 ],
             )
 

@@ -27,8 +27,8 @@ class RuntimeMysqlClient:
 
     def _connect(self):
         if self._connection_factory is None:
-            raise RuntimeError("PyMySQL is required to open MySQL runtime connections.")
-        return self._connection_factory(
+            raise RuntimeError("缺少 PyMySQL 依赖，无法创建 MySQL 运行时连接。")
+        connect_kwargs = dict(
             host=self._config.host,
             port=self._config.port,
             user=self._config.username,
@@ -37,8 +37,10 @@ class RuntimeMysqlClient:
             connect_timeout=self._config.connect_timeout_seconds,
             read_timeout=self._config.query_timeout_seconds,
             write_timeout=self._config.query_timeout_seconds,
-            cursorclass=self._cursorclass,
         )
+        if self._cursorclass is not None:
+            connect_kwargs["cursorclass"] = self._cursorclass
+        return self._connection_factory(**connect_kwargs)
 
     def query_one(self, sql: str) -> dict[str, object]:
         rows = self.query_all(sql)
@@ -67,10 +69,12 @@ class SourceMysqlConnectionFactory:
         connect_timeout_seconds: int,
         query_timeout_seconds: int,
         connection_factory=None,
+        cursorclass: Any | None = None,
     ) -> None:
         self._connect_timeout_seconds = connect_timeout_seconds
         self._query_timeout_seconds = query_timeout_seconds
         self._connection_factory = connection_factory
+        self._cursorclass = cursorclass
 
     def build_config(self, route) -> MysqlConnectionConfig:
         return MysqlConnectionConfig(
@@ -87,6 +91,7 @@ class SourceMysqlConnectionFactory:
         return RuntimeMysqlClient(
             self._connection_factory,
             self.build_config(route),
+            cursorclass=self._cursorclass,
         )
 
 

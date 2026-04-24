@@ -1,4 +1,9 @@
-from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_sql_from_message, StreamUpdateBuffer
+from chatdba.dingtalk.channel import (
+    DingTalkInboundMessage,
+    StreamUpdateBuffer,
+    extract_sql_from_message,
+    extract_template_id_and_clean_text,
+)
 
 
 def test_extract_sql_from_mentioned_message():
@@ -34,3 +39,24 @@ def test_stream_update_buffer_respects_interval_before_forced_flush():
     assert buffer.flush() == ""
     assert buffer.flush() == "hello world"
     assert buffer.flush(force=True) == ""
+
+
+def test_extract_template_id_and_clean_text_from_control_line():
+    template_id, cleaned = extract_template_id_and_clean_text(
+        "模板ID: abc-template\nSQL优化\nselect * from orders;"
+    )
+
+    assert template_id == "abc-template"
+    assert cleaned == "SQL优化\nselect * from orders;"
+
+
+def test_extract_sql_ignores_template_control_line():
+    message = DingTalkInboundMessage(
+        message_id="msg-3",
+        conversation_id="conv-1",
+        sender_id="user-1",
+        text="template_id=my-template\nSQL优化 select * from orders where id = 1",
+        session_webhook="https://example.test/webhook",
+    )
+
+    assert extract_sql_from_message(message) == "select * from orders where id = 1"

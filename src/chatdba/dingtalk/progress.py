@@ -28,6 +28,10 @@ class StreamingProgressBridge:
         self._buffer.add(chunk)
         self._flush(force=False)
 
+    def emit_now(self, chunk: str) -> None:
+        self._buffer.add(chunk)
+        self._flush(force=True)
+
     def finish(self) -> None:
         self._flush(force=True)
 

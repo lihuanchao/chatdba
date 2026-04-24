@@ -1,9 +1,16 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_PROJECT_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(Path(".env"), _PROJECT_ROOT_ENV),
+        extra="ignore",
+    )
 
     app_env: str = "local"
     database_url: str
@@ -16,6 +23,8 @@ class Settings(BaseSettings):
     dingtalk_client_id: str = ""
     dingtalk_client_secret: str = Field(default="", repr=False)
     dingtalk_stream_enabled: bool = False
+    dingtalk_ai_card_template_id: str = ""
+    dingtalk_ai_card_content_field: str = "msgContent"
     mysql_connect_timeout_seconds: int = 3
     mysql_query_timeout_seconds: int = 8
     stream_update_interval_ms: int = 1000

@@ -14,13 +14,13 @@ def run_sql_optimization_task(
     progress_sink: ProgressSink | None = None,
 ) -> dict[str, object]:
     if progress_sink:
-        progress_sink("Parsing SQL\n")
+        progress_sink("正在解析 SQL...\n")
     graph = build_sql_optimization_graph(
         collector=collector,
         report_composer=report_composer,
     )
     result = graph.invoke(task_payload)
     if progress_sink:
-        progress_sink("Generated diagnostic findings\n")
-        progress_sink("Built optimization report\n")
+        progress_sink("已生成诊断结论...\n")
+        progress_sink("已生成优化报告...\n")
     return result

@@ -29,13 +29,13 @@ class RoutedMysqlEvidenceCollector:
             explain_json = collector.collect_explain_json(sql)
         except Exception as exc:
             missing_evidence.append("explain_json")
-            collection_errors.append(f"Failed to collect execution plan: {exc}")
+            collection_errors.append(f"执行计划采集失败：{exc}")
 
         try:
             create_tables = collector.collect_create_tables(tables)
         except Exception as exc:
             missing_evidence.append("create_table")
-            collection_errors.append(f"Failed to collect table DDL: {exc}")
+            collection_errors.append(f"建表语句采集失败：{exc}")
 
         if explain_json is not None and create_tables:
             return EvidenceEnvelope(

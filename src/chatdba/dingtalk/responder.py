@@ -14,6 +14,22 @@ class DingTalkTextSender(Protocol):
     ) -> None:
         pass
 
+    def send_markdown_chunk(
+        self,
+        *,
+        message: DingTalkInboundMessage,
+        text: str,
+    ) -> None:
+        pass
+
+    def finish_markdown_stream(
+        self,
+        *,
+        message: DingTalkInboundMessage,
+        failed: bool = False,
+    ) -> None:
+        pass
+
 
 @dataclass(frozen=True)
 class DingTalkSendResult:
@@ -33,11 +49,15 @@ class DingTalkResponder:
         text: str,
     ) -> DingTalkSendResult:
         try:
-            self._sender.send_text(
-                conversation_id=message.conversation_id,
-                session_webhook=message.session_webhook,
-                text=text,
-            )
+            send_chunk = getattr(self._sender, "send_markdown_chunk", None)
+            if callable(send_chunk):
+                send_chunk(message=message, text=text)
+            else:
+                self._sender.send_text(
+                    conversation_id=message.conversation_id,
+                    session_webhook=message.session_webhook,
+                    text=text,
+                )
         except Exception as exc:
             return DingTalkSendResult(
                 conversation_id=message.conversation_id,
@@ -49,5 +69,31 @@ class DingTalkResponder:
         return DingTalkSendResult(
             conversation_id=message.conversation_id,
             message=text,
+            ok=True,
+        )
+
+    def finish_stream(
+        self,
+        message: DingTalkInboundMessage,
+        *,
+        failed: bool = False,
+    ) -> DingTalkSendResult | None:
+        finish_chunk = getattr(self._sender, "finish_markdown_stream", None)
+        if not callable(finish_chunk):
+            return None
+
+        try:
+            finish_chunk(message=message, failed=failed)
+        except Exception as exc:
+            return DingTalkSendResult(
+                conversation_id=message.conversation_id,
+                message="finish_stream",
+                ok=False,
+                error=str(exc),
+            )
+
+        return DingTalkSendResult(
+            conversation_id=message.conversation_id,
+            message="finish_stream",
             ok=True,
         )

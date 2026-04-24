@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 from openai import OpenAI
@@ -13,20 +14,25 @@ from chatdba.dingtalk.sdk_runtime import (
     DingTalkStreamChatbotHandler,
     load_dingtalk_stream_sdk,
 )
-from chatdba.dingtalk.sender import DingTalkSessionWebhookSender
+from chatdba.dingtalk.sender import DingTalkCardStreamingSender, DingTalkSessionWebhookSender
 from chatdba.models.qwen_gateway import QwenGateway
 from chatdba.tasks.service import OptimizationTaskService
 from chatdba.workflow.report_builder import OptimizationReportComposer
 
+LOGGER = logging.getLogger(__name__)
+
 
 class SqlOnlyCollector:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason or "当前未配置元数据库路由，系统将退化为 SQL-only 分析。"
+
     def collect(self, sql: str, tables: list[object]):
         from chatdba.domain.models import EvidenceEnvelope, EvidenceStatus
 
         return EvidenceEnvelope(
             status=EvidenceStatus.SQL_ONLY,
             missing_evidence=["route_info", "explain_json", "create_table"],
-            collection_errors=["Metadata routing is not configured for this runtime."],
+            collection_errors=[self._reason],
         )
 
 
@@ -51,7 +57,7 @@ def build_dingtalk_runtime(
 ) -> DingTalkSdkRuntime:
     bundle = sdk_bundle or load_dingtalk_stream_sdk()
     runtime_collector = collector or SqlOnlyCollector()
-    runtime_sender = sender or DingTalkSessionWebhookSender()
+    runtime_sender = sender
 
     if (
         collector is None
@@ -62,24 +68,75 @@ def build_dingtalk_runtime(
         try:
             import pymysql
         except ModuleNotFoundError:
-            pymysql = None
-
-        metadata_client = build_metadata_client(settings)
-        router = MetadataRouter(
-            MysqlMetadataRouteRepository(
-                client=metadata_client,
-                route_table=settings.metadata_route_table,
-                instance_table=settings.metadata_instance_table,
+            runtime_collector = SqlOnlyCollector(
+                "已配置元数据库路由，但缺少 PyMySQL 依赖，请安装 `pip install PyMySQL`。"
             )
-        )
-        runtime_collector = RoutedMysqlEvidenceCollector(
-            router=router,
-            connection_factory=SourceMysqlConnectionFactory(
-                connect_timeout_seconds=settings.mysql_connect_timeout_seconds,
-                query_timeout_seconds=settings.mysql_query_timeout_seconds,
-                connection_factory=pymysql.connect if pymysql is not None else None,
-            ),
-        )
+        else:
+            connect_fn = getattr(pymysql, "connect", None)
+            if not callable(connect_fn):
+                runtime_collector = SqlOnlyCollector(
+                    "PyMySQL.connect 不可用，无法连接源 MySQL 实例。"
+                )
+            else:
+                try:
+                    metadata_client = build_metadata_client(settings)
+                    router = MetadataRouter(
+                        MysqlMetadataRouteRepository(
+                            client=metadata_client,
+                            route_table=settings.metadata_route_table,
+                            instance_table=settings.metadata_instance_table,
+                        )
+                    )
+                    runtime_collector = RoutedMysqlEvidenceCollector(
+                        router=router,
+                        connection_factory=SourceMysqlConnectionFactory(
+                            connect_timeout_seconds=settings.mysql_connect_timeout_seconds,
+                            query_timeout_seconds=settings.mysql_query_timeout_seconds,
+                            connection_factory=connect_fn,
+                            cursorclass=getattr(pymysql.cursors, "DictCursor", None),
+                        ),
+                    )
+                except Exception as exc:
+                    runtime_collector = SqlOnlyCollector(
+                        f"元数据库路由初始化失败：{exc}"
+                    )
+
+    credential = bundle.stream_module.Credential(
+        settings.dingtalk_client_id,
+        settings.dingtalk_client_secret,
+    )
+    client = bundle.stream_module.DingTalkStreamClient(credential)
+
+    if runtime_sender is None:
+        card_instance_cls = getattr(bundle.stream_module, "AIMarkdownCardInstance", None)
+        chatbot_message_cls = getattr(bundle.chatbot_module, "ChatbotMessage", None)
+        if card_instance_cls is not None and chatbot_message_cls is not None:
+            default_template_id = (
+                getattr(settings, "dingtalk_ai_card_template_id", "") or ""
+            ).strip()
+            card_content_field = (
+                getattr(settings, "dingtalk_ai_card_content_field", "msgContent")
+                or "msgContent"
+            ).strip() or "msgContent"
+            runtime_sender = DingTalkCardStreamingSender(
+                dingtalk_client=client,
+                chatbot_message_cls=chatbot_message_cls,
+                card_instance_cls=card_instance_cls,
+                default_card_template_id=default_template_id or None,
+                ai_card_status_inputing=getattr(
+                    getattr(bundle.stream_module, "AICardStatus", None),
+                    "INPUTING",
+                    None,
+                ),
+                card_content_field=card_content_field,
+            )
+            LOGGER.info(
+                "DingTalk card sender enabled: default_template_id=%s content_field=%s",
+                default_template_id or "<sdk-default>",
+                card_content_field,
+            )
+        else:
+            runtime_sender = DingTalkSessionWebhookSender()
 
     responder = DingTalkResponder(runtime_sender)
     qwen_gateway = None
@@ -110,11 +167,6 @@ def build_dingtalk_runtime(
         adapter=adapter,
     )
 
-    credential = bundle.stream_module.Credential(
-        settings.dingtalk_client_id,
-        settings.dingtalk_client_secret,
-    )
-    client = bundle.stream_module.DingTalkStreamClient(credential)
     client.register_callback_handler(
         bundle.chatbot_module.ChatbotMessage.TOPIC,
         callback_handler,
@@ -135,7 +187,42 @@ def create_sdk_callback_handler(
 ):
     class CallbackHandler(bundle.stream_module.ChatbotHandler):
         async def process(self, callback):
-            adapter.handle_callback_data(callback.data)
+            try:
+                result = adapter.handle_callback_data(callback.data)
+            except Exception:
+                LOGGER.exception("Failed to process DingTalk callback.")
+                return bundle.stream_module.AckMessage.STATUS_OK, "OK"
+
+            _log_callback_result(result, callback.data)
             return bundle.stream_module.AckMessage.STATUS_OK, "OK"
 
     return CallbackHandler()
+
+
+def _log_callback_result(result: object, callback_data: dict[str, Any]) -> None:
+    message_id = str(callback_data.get("msgId", ""))
+    conversation_id = str(callback_data.get("conversationId", ""))
+    has_session_webhook = bool(callback_data.get("sessionWebhook"))
+    accepted = getattr(result, "accepted", None)
+    status = getattr(getattr(result, "status", None), "value", None)
+    LOGGER.info(
+        "DingTalk callback handled: message_id=%s conversation_id=%s session_webhook=%s accepted=%s status=%s",
+        message_id,
+        conversation_id,
+        has_session_webhook,
+        accepted,
+        status,
+    )
+
+    send_results = getattr(result, "send_results", None)
+    if not isinstance(send_results, list):
+        return
+
+    for item in send_results:
+        if getattr(item, "ok", True):
+            continue
+        LOGGER.warning(
+            "DingTalk reply failed: conversation_id=%s error=%s",
+            getattr(item, "conversation_id", ""),
+            getattr(item, "error", ""),
+        )

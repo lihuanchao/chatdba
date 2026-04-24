@@ -133,7 +133,7 @@ def test_router_degrades_when_tables_span_multiple_instances():
     assert route.status == EvidenceStatus.SQL_ONLY
     assert route.route is None
     assert route.missing_evidence == ["route_info", "explain_json", "create_table"]
-    assert "multiple source instances" in route.collection_errors[0]
+    assert "涉及多个源实例" in route.collection_errors[0]
 
 
 def test_router_degrades_when_table_route_is_missing():
@@ -146,4 +146,4 @@ def test_router_degrades_when_table_route_is_missing():
 
     assert route.status == EvidenceStatus.SQL_ONLY
     assert route.route is None
-    assert "No metadata route found" in route.collection_errors[0]
+    assert "未找到一个或多个表的路由信息" in route.collection_errors[0]

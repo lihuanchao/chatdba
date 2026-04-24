@@ -21,6 +21,18 @@ class FailingSender:
         raise RuntimeError("network down")
 
 
+class MarkdownSender:
+    def __init__(self):
+        self.chunks = []
+        self.finished = []
+
+    def send_markdown_chunk(self, *, message, text):
+        self.chunks.append((message.message_id, text))
+
+    def finish_markdown_stream(self, *, message, failed=False):
+        self.finished.append((message.message_id, failed))
+
+
 def make_message() -> DingTalkInboundMessage:
     return DingTalkInboundMessage(
         message_id="msg-1",
@@ -59,3 +71,24 @@ def test_responder_captures_sender_errors():
     assert result.conversation_id == "conv-1"
     assert result.message == "hello"
     assert result.error == "network down"
+
+
+def test_responder_prefers_markdown_chunk_sender_when_available():
+    sender = MarkdownSender()
+    responder = DingTalkResponder(sender)
+
+    result = responder.reply_text(make_message(), "## 片段")
+
+    assert result.ok is True
+    assert sender.chunks == [("msg-1", "## 片段")]
+
+
+def test_responder_finishes_markdown_stream():
+    sender = MarkdownSender()
+    responder = DingTalkResponder(sender)
+
+    result = responder.finish_stream(make_message(), failed=False)
+
+    assert result is not None
+    assert result.ok is True
+    assert sender.finished == [("msg-1", False)]

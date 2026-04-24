@@ -39,12 +39,12 @@ def test_dingtalk_runtime_runs_sql_optimization_and_streams_report():
                     "confidence_label": "low",
                     "evidence_status": "sql_only",
                     "missing_evidence": ["route_info", "explain_json", "create_table"],
-                    "limitations": ["No source execution evidence was available."],
+                    "limitations": ["未获取到源库执行证据，报告基于 SQL 文本、规则和历史案例生成。"],
                     "bottlenecks": [{"code": "limit_with_order_by", "evidence": "ORDER BY with LIMIT may require a supporting index."}],
                     "sql_rewrites": [],
                     "index_recommendations": [],
                     "risks": [],
-                    "validation_steps": ["Validate the SQL against the target source database before applying any recommendation."],
+                    "validation_steps": ["先在目标库测试环境执行 EXPLAIN 与回归测试，再决定是否上线。"],
                     "similar_cases": [],
                 }
             )
@@ -76,4 +76,7 @@ def test_dingtalk_runtime_runs_sql_optimization_and_streams_report():
     assert result.task_id == "task-1"
     assert result.status == TaskStatus.COMPLETED
     assert [message["text"] for message in sender.messages][0] == SQL_OPTIMIZATION_STARTED_MESSAGE
-    assert "Evidence: SQL_ONLY" in sender.messages[-1]["text"]
+    full_stream_text = "".join(message["text"] for message in sender.messages[1:])
+    assert "# SQL优化报告" in full_stream_text
+    assert "## SQL重写建议" in full_stream_text
+    assert "## 索引推荐" in full_stream_text
