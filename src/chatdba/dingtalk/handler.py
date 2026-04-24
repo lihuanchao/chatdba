@@ -3,6 +3,7 @@ from typing import Protocol
 
 from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_sql_from_message
 from chatdba.dingtalk.progress import StreamingProgressBridge
+from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.responder import DingTalkResponder, DingTalkSendResult
 from chatdba.domain.models import DingTalkContext, TaskStatus
 from chatdba.tasks.service import OptimizationTaskExecution
@@ -15,7 +16,6 @@ SQL_OPTIMIZATION_USAGE_MESSAGE = (
     "select * from orders where user_id = 100;"
 )
 SQL_OPTIMIZATION_STARTED_MESSAGE = "已收到 SQL 优化请求，开始分析执行计划和元数据。"
-SQL_OPTIMIZATION_SUCCESS_MESSAGE = "SQL 优化分析完成。"
 SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX = "SQL 优化任务失败："
 
 
@@ -123,8 +123,9 @@ class DingTalkSqlOptimizationHandler:
                 send_results=send_results,
             )
 
+        report = execution.result["report"]
         send_results.append(
-            self._responder.reply_text(message, SQL_OPTIMIZATION_SUCCESS_MESSAGE)
+            self._responder.reply_text(message, render_report_for_dingtalk(report))
         )
         return DingTalkHandleResult(
             accepted=True,

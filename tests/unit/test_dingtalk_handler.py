@@ -2,12 +2,12 @@ from chatdba.dingtalk.channel import DingTalkInboundMessage
 from chatdba.dingtalk.handler import (
     SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX,
     SQL_OPTIMIZATION_STARTED_MESSAGE,
-    SQL_OPTIMIZATION_SUCCESS_MESSAGE,
     SQL_OPTIMIZATION_USAGE_MESSAGE,
     DingTalkSqlOptimizationHandler,
 )
 from chatdba.dingtalk.responder import DingTalkSendResult
-from chatdba.domain.models import TaskStatus
+from chatdba.domain.models import ConfidenceLabel, EvidenceStatus, TaskStatus
+from chatdba.domain.report_schema import OptimizationReport
 from chatdba.tasks.service import OptimizationTaskExecution
 
 
@@ -41,7 +41,38 @@ class SuccessfulTaskService:
         return OptimizationTaskExecution(
             task_id="task-1",
             status=TaskStatus.COMPLETED,
-            result={"findings": []},
+            result={
+                "report": OptimizationReport.model_validate(
+                    {
+                        "task_id": "task-1",
+                        "summary": "Use an index to avoid filesort.",
+                        "confidence": 0.35,
+                        "confidence_label": "low",
+                        "evidence_status": "sql_only",
+                        "missing_evidence": [
+                            "route_info",
+                            "explain_json",
+                            "create_table",
+                        ],
+                        "limitations": [
+                            "No source execution evidence was available."
+                        ],
+                        "bottlenecks": [
+                            {
+                                "code": "limit_with_order_by",
+                                "evidence": "ORDER BY with LIMIT may require a supporting index.",
+                            }
+                        ],
+                        "sql_rewrites": [],
+                        "index_recommendations": [],
+                        "risks": [],
+                        "validation_steps": [
+                            "Validate the SQL against the target source database before applying any recommendation."
+                        ],
+                        "similar_cases": [],
+                    }
+                )
+            },
         )
 
 
@@ -81,7 +112,7 @@ def test_handler_sends_usage_guidance_for_empty_sql():
     assert service.calls == []
 
 
-def test_handler_runs_task_and_sends_start_progress_and_success():
+def test_handler_runs_task_and_sends_start_progress_and_report():
     responder = RecordingResponder()
     service = SuccessfulTaskService()
     handler = DingTalkSqlOptimizationHandler(
@@ -97,11 +128,10 @@ def test_handler_runs_task_and_sends_start_progress_and_success():
     assert result.status == TaskStatus.COMPLETED
     assert service.calls[0]["raw_sql"] == "select * from orders"
     assert service.calls[0]["dingtalk_context"].conversation_id == "conv-1"
-    assert responder.messages == [
-        SQL_OPTIMIZATION_STARTED_MESSAGE,
-        "Parsing SQL\n",
-        SQL_OPTIMIZATION_SUCCESS_MESSAGE,
-    ]
+    assert responder.messages[0] == SQL_OPTIMIZATION_STARTED_MESSAGE
+    assert responder.messages[1] == "Parsing SQL\n"
+    assert "Evidence: SQL_ONLY" in responder.messages[-1]
+    assert "Use an index to avoid filesort." in responder.messages[-1]
 
 
 def test_handler_sends_failure_message_when_task_fails():

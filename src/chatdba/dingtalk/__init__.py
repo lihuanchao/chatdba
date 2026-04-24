@@ -7,7 +7,7 @@ from chatdba.dingtalk.channel import (
 )
 from chatdba.dingtalk.runtime import (
     DingTalkSdkRuntime,
-    UnsupportedMysqlCollector,
+    SqlOnlyCollector,
     build_dingtalk_runtime,
 )
 from chatdba.dingtalk.sender import DingTalkSessionWebhookSender
@@ -19,7 +19,7 @@ __all__ = [
     "DingTalkSessionWebhookSender",
     "DingTalkStreamRuntime",
     "StreamUpdateBuffer",
-    "UnsupportedMysqlCollector",
+    "SqlOnlyCollector",
     "build_dingtalk_runtime",
     "extract_sql_from_message",
 ]

@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from chatdba.dingtalk.runtime import (
-    UnsupportedMysqlCollector,
     build_dingtalk_runtime,
 )
 from chatdba.dingtalk.sdk_runtime import DingTalkSdkBundle
@@ -74,6 +73,18 @@ def make_settings():
         dingtalk_client_id="client-id",
         dingtalk_client_secret="client-secret",
         stream_update_interval_ms=1000,
+        mysql_connect_timeout_seconds=3,
+        mysql_query_timeout_seconds=8,
+        metadata_mysql_host="",
+        metadata_mysql_port=3306,
+        metadata_mysql_user="",
+        metadata_mysql_password="",
+        metadata_mysql_database="",
+        metadata_route_table="table_routes",
+        metadata_instance_table="db_instances",
+        qwen_api_key="",
+        qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        qwen_model="qwen-plus",
     )
 
 
@@ -98,23 +109,56 @@ def test_build_runtime_registers_chatbot_handler_and_starts_client():
     assert runtime.client.started is True
 
 
-def test_build_runtime_uses_explicit_fallback_collector_when_none_is_provided():
+def test_build_runtime_uses_sql_only_collector_when_none_is_provided():
     runtime = build_dingtalk_runtime(
         settings=make_settings(),
         sender=FakeSender(),
         sdk_bundle=make_sdk_bundle(),
     )
 
-    with pytest.raises(
-        RuntimeError, match="MySQL runtime collector is not configured"
-    ):
-        runtime.collector.collect("select 1", [])
+    envelope = runtime.collector.collect("select 1", [])
+
+    assert envelope.status.value == "sql_only"
+    assert envelope.collection_errors == [
+        "Metadata routing is not configured for this runtime."
+    ]
 
 
-def test_registered_sdk_callback_handler_acks_and_delegates_to_app_handler():
+def test_build_runtime_uses_routed_collector_when_metadata_settings_are_present(monkeypatch):
+    seen = {}
+    settings = make_settings()
+    settings.metadata_mysql_host = "127.0.0.1"
+    settings.metadata_mysql_user = "metadata_ro"
+    settings.metadata_mysql_password = "secret"
+    settings.metadata_mysql_database = "metadata"
+
+    class FakeRoutedCollector:
+        def __init__(self, *, router, connection_factory):
+            seen["router"] = router
+            seen["connection_factory"] = connection_factory
+
+    monkeypatch.setattr(
+        "chatdba.dingtalk.runtime.build_metadata_client",
+        lambda settings: "metadata-client",
+    )
+    monkeypatch.setattr(
+        "chatdba.dingtalk.runtime.RoutedMysqlEvidenceCollector",
+        FakeRoutedCollector,
+    )
+
+    runtime = build_dingtalk_runtime(
+        settings=settings,
+        sender=FakeSender(),
+        sdk_bundle=make_sdk_bundle(),
+    )
+
+    assert type(runtime.collector).__name__ == "FakeRoutedCollector"
+    assert seen["router"].__class__.__name__ == "MetadataRouter"
+
+
+def test_registered_sdk_callback_handler_acks_even_when_routing_is_not_configured():
     runtime = build_dingtalk_runtime(
         settings=make_settings(),
-        collector=UnsupportedMysqlCollector(),
         sender=FakeSender(),
         sdk_bundle=make_sdk_bundle(),
     )

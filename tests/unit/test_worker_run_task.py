@@ -9,8 +9,9 @@ def test_run_sql_optimization_task_invokes_graph_with_collector(monkeypatch):
             seen["payload"] = payload
             return {"result": "ok"}
 
-    def fake_build_sql_optimization_graph(*, collector):
+    def fake_build_sql_optimization_graph(*, collector, report_composer=None):
         seen["collector"] = collector
+        seen["report_composer"] = report_composer
         return FakeGraph()
 
     monkeypatch.setattr(
@@ -21,10 +22,16 @@ def test_run_sql_optimization_task_invokes_graph_with_collector(monkeypatch):
     collector = object()
     task_payload = {"raw_sql": "select * from orders"}
 
-    result = run_sql_optimization_task(task_payload, collector)
+    report_composer = object()
+    result = run_sql_optimization_task(
+        task_payload,
+        collector,
+        report_composer=report_composer,
+    )
 
     assert result == {"result": "ok"}
     assert seen["collector"] is collector
+    assert seen["report_composer"] is report_composer
     assert seen["payload"] == task_payload
 
 
@@ -33,7 +40,7 @@ def test_run_sql_optimization_task_emits_progress(monkeypatch):
         def invoke(self, payload):
             return {"result": "ok", "payload": payload}
 
-    def fake_build_sql_optimization_graph(*, collector):
+    def fake_build_sql_optimization_graph(*, collector, report_composer=None):
         return FakeGraph()
 
     monkeypatch.setattr(
@@ -50,4 +57,8 @@ def test_run_sql_optimization_task_emits_progress(monkeypatch):
     )
 
     assert result["result"] == "ok"
-    assert events == ["Parsing SQL\n", "Generated diagnostic findings\n"]
+    assert events == [
+        "Parsing SQL\n",
+        "Generated diagnostic findings\n",
+        "Built optimization report\n",
+    ]

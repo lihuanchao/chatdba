@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 from typing import Any
 
+from openai import OpenAI
+
+from chatdba.db.metadata_router import MetadataRouter, MysqlMetadataRouteRepository
+from chatdba.db.routed_collector import RoutedMysqlEvidenceCollector
+from chatdba.db.runtime_mysql import SourceMysqlConnectionFactory, build_metadata_client
 from chatdba.dingtalk.handler import DingTalkSqlOptimizationHandler
 from chatdba.dingtalk.responder import DingTalkResponder
 from chatdba.dingtalk.sdk_runtime import (
@@ -9,13 +14,19 @@ from chatdba.dingtalk.sdk_runtime import (
     load_dingtalk_stream_sdk,
 )
 from chatdba.dingtalk.sender import DingTalkSessionWebhookSender
+from chatdba.models.qwen_gateway import QwenGateway
 from chatdba.tasks.service import OptimizationTaskService
+from chatdba.workflow.report_builder import OptimizationReportComposer
 
 
-class UnsupportedMysqlCollector:
+class SqlOnlyCollector:
     def collect(self, sql: str, tables: list[object]):
-        raise RuntimeError(
-            "MySQL runtime collector is not configured for the DingTalk runtime yet."
+        from chatdba.domain.models import EvidenceEnvelope, EvidenceStatus
+
+        return EvidenceEnvelope(
+            status=EvidenceStatus.SQL_ONLY,
+            missing_evidence=["route_info", "explain_json", "create_table"],
+            collection_errors=["Metadata routing is not configured for this runtime."],
         )
 
 
@@ -39,11 +50,55 @@ def build_dingtalk_runtime(
     sdk_bundle: DingTalkSdkBundle | None = None,
 ) -> DingTalkSdkRuntime:
     bundle = sdk_bundle or load_dingtalk_stream_sdk()
-    runtime_collector = collector or UnsupportedMysqlCollector()
+    runtime_collector = collector or SqlOnlyCollector()
     runtime_sender = sender or DingTalkSessionWebhookSender()
 
+    if (
+        collector is None
+        and settings.metadata_mysql_host
+        and settings.metadata_mysql_user
+        and settings.metadata_mysql_database
+    ):
+        try:
+            import pymysql
+        except ModuleNotFoundError:
+            pymysql = None
+
+        metadata_client = build_metadata_client(settings)
+        router = MetadataRouter(
+            MysqlMetadataRouteRepository(
+                client=metadata_client,
+                route_table=settings.metadata_route_table,
+                instance_table=settings.metadata_instance_table,
+            )
+        )
+        runtime_collector = RoutedMysqlEvidenceCollector(
+            router=router,
+            connection_factory=SourceMysqlConnectionFactory(
+                connect_timeout_seconds=settings.mysql_connect_timeout_seconds,
+                query_timeout_seconds=settings.mysql_query_timeout_seconds,
+                connection_factory=pymysql.connect if pymysql is not None else None,
+            ),
+        )
+
     responder = DingTalkResponder(runtime_sender)
-    task_service = OptimizationTaskService(collector=runtime_collector)
+    qwen_gateway = None
+    if settings.qwen_api_key:
+        qwen_gateway = QwenGateway(
+            client=OpenAI(
+                base_url=settings.qwen_base_url,
+                api_key=settings.qwen_api_key,
+            ),
+            model=settings.qwen_model,
+        )
+    report_composer = OptimizationReportComposer(
+        qwen_gateway=qwen_gateway,
+        cases=[],
+    )
+    task_service = OptimizationTaskService(
+        collector=runtime_collector,
+        report_composer=report_composer,
+    )
     app_handler = DingTalkSqlOptimizationHandler(
         task_service=task_service,
         responder=responder,

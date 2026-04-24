@@ -19,3 +19,10 @@ class Settings(BaseSettings):
     mysql_connect_timeout_seconds: int = 3
     mysql_query_timeout_seconds: int = 8
     stream_update_interval_ms: int = 1000
+    metadata_mysql_host: str = ""
+    metadata_mysql_port: int = 3306
+    metadata_mysql_user: str = ""
+    metadata_mysql_password: str = Field(default="", repr=False)
+    metadata_mysql_database: str = ""
+    metadata_route_table: str = "table_routes"
+    metadata_instance_table: str = "db_instances"
