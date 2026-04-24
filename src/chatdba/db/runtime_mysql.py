@@ -26,6 +26,8 @@ class RuntimeMysqlClient:
         self._cursorclass = cursorclass
 
     def _connect(self):
+        if self._connection_factory is None:
+            raise RuntimeError("PyMySQL is required to open MySQL runtime connections.")
         return self._connection_factory(
             host=self._config.host,
             port=self._config.port,
