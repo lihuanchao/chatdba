@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class MysqlClient(Protocol):
     def query_one(self, sql: str) -> dict[str, object]:
-        ...
+        raise NotImplementedError
 
 
 class MysqlTableTarget(BaseModel):
@@ -48,9 +48,20 @@ class MysqlEvidenceCollector:
         self._client = client
 
     def collect(self, sql: str, tables: list[MysqlTableTarget]) -> MysqlEvidence:
-        explain_row = self._client.query_one(f"EXPLAIN FORMAT=JSON {sql}")
-        create_tables: dict[str, str] = {}
+        return MysqlEvidence(
+            explain_json=self.collect_explain_json(sql),
+            create_tables=self.collect_create_tables(tables),
+        )
 
+    def collect_explain_json(self, sql: str) -> dict[str, object]:
+        explain_row = self._client.query_one(f"EXPLAIN FORMAT=JSON {sql}")
+        return _parse_explain_payload(explain_row["EXPLAIN"])
+
+    def collect_create_tables(
+        self,
+        tables: list[MysqlTableTarget],
+    ) -> dict[str, str]:
+        create_tables: dict[str, str] = {}
         for table in tables:
             row = self._client.query_one(
                 "SHOW CREATE TABLE "
@@ -58,8 +69,4 @@ class MysqlEvidenceCollector:
                 f"{_quote_mysql_identifier(table.table_name)}"
             )
             create_tables[table.qualified_name] = str(row["Create Table"])
-
-        return MysqlEvidence(
-            explain_json=_parse_explain_payload(explain_row["EXPLAIN"]),
-            create_tables=create_tables,
-        )
+        return create_tables

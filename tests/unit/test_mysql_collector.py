@@ -55,6 +55,25 @@ def test_collector_parses_bytes_explain_payload():
     assert evidence.explain_json["query_block"]["table"]["table_name"] == "orders"
 
 
+def test_collect_explain_json_is_available_for_partial_collection():
+    collector = MysqlEvidenceCollector(RecordingMysqlClient())
+
+    explain_json = collector.collect_explain_json("select * from shop.orders")
+
+    assert explain_json["query_block"]["table"]["table_name"] == "orders"
+
+
+def test_collect_create_tables_is_available_for_partial_collection():
+    collector = MysqlEvidenceCollector(RecordingMysqlClient())
+    target = MysqlTableTarget(schema_name="shop", table_name="orders")
+
+    create_tables = collector.collect_create_tables([target])
+
+    assert create_tables == {
+        "shop.orders": "CREATE TABLE orders (id bigint primary key)"
+    }
+
+
 def test_collector_escapes_backticks_in_show_create_table_query():
     client = RecordingMysqlClient()
     collector = MysqlEvidenceCollector(client)
