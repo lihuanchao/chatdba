@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from chatdba.domain.models import ConfidenceLabel, EvidenceStatus
 from chatdba.domain.report_schema import OptimizationReport
 
 
@@ -10,6 +11,10 @@ def test_report_accepts_required_sections():
             "task_id": "task-1",
             "summary": "Full table scan on orders.",
             "confidence": 0.82,
+            "confidence_label": "high",
+            "evidence_status": "full",
+            "missing_evidence": [],
+            "limitations": [],
             "bottlenecks": [{"code": "full_table_scan", "evidence": "rows_examined is high"}],
             "sql_rewrites": [{"title": "Use sargable predicate", "sql": "select * from orders where created_at >= ?"}],
             "index_recommendations": [{"ddl": "create index idx_orders_created_at on orders(created_at)", "risk": "medium"}],
@@ -21,6 +26,8 @@ def test_report_accepts_required_sections():
 
     assert report.task_id == "task-1"
     assert report.confidence == 0.82
+    assert report.confidence_label == ConfidenceLabel.HIGH
+    assert report.evidence_status == EvidenceStatus.FULL
 
 
 def test_report_rejects_confidence_above_one():
@@ -30,6 +37,10 @@ def test_report_rejects_confidence_above_one():
                 "task_id": "task-1",
                 "summary": "Invalid confidence.",
                 "confidence": 1.5,
+                "confidence_label": "low",
+                "evidence_status": "sql_only",
+                "missing_evidence": ["route_info"],
+                "limitations": ["No source execution evidence was available."],
                 "bottlenecks": [],
                 "sql_rewrites": [],
                 "index_recommendations": [],
