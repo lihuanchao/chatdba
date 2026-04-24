@@ -102,10 +102,32 @@ DINGTALK_CLIENT_ID=replace-with-client-id
 DINGTALK_CLIENT_SECRET=replace-with-client-secret
 ```
 
-Current runtime boundary:
+## Metadata Routing And Degraded Analysis
 
-- DingTalk transport is real.
-- SQL optimization still uses the current in-process collector wiring.
-- Until a production MySQL collector is configured, SQL requests received from
-  DingTalk will fail with a clear collector configuration message instead of
-  silently pretending to optimize against a real database.
+ChatDBA can now route SQL through the metadata database to a source MySQL instance
+and try to collect real `EXPLAIN FORMAT=JSON` plus `SHOW CREATE TABLE`.
+
+Current routing behavior:
+
+- single-instance SQL is routed to the source database,
+- cross-instance SQL degrades to SQL-only analysis,
+- missing metadata route degrades to SQL-only analysis,
+- failed source evidence collection still returns an optimization report.
+
+Required metadata settings:
+
+```text
+METADATA_MYSQL_HOST=
+METADATA_MYSQL_PORT=3306
+METADATA_MYSQL_USER=
+METADATA_MYSQL_PASSWORD=
+METADATA_MYSQL_DATABASE=
+METADATA_ROUTE_TABLE=table_routes
+METADATA_INSTANCE_TABLE=db_instances
+```
+
+Evidence levels in the final report:
+
+- `full`
+- `partial`
+- `sql_only`

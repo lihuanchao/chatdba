@@ -18,6 +18,18 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
 
 
+class EvidenceStatus(StrEnum):
+    FULL = "full"
+    PARTIAL = "partial"
+    SQL_ONLY = "sql_only"
+
+
+class ConfidenceLabel(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 class DingTalkContext(BaseModel):
     message_id: str
     conversation_id: str
@@ -61,3 +73,22 @@ class RuleFinding(BaseModel):
     message: str
     evidence: dict[str, Any] = Field(default_factory=dict)
 
+
+class SourceRoute(BaseModel):
+    instance_id: str
+    db_type: str
+    version: str | None = None
+    host: str | None = None
+    port: int | None = None
+    default_schema: str | None = None
+    credentials: dict[str, str] = Field(default_factory=dict)
+    schema_names: list[str] = Field(default_factory=list)
+
+
+class EvidenceEnvelope(BaseModel):
+    status: EvidenceStatus
+    route: SourceRoute | None = None
+    explain_json: dict[str, object] | None = None
+    create_tables: dict[str, str] = Field(default_factory=dict)
+    missing_evidence: list[str] = Field(default_factory=list)
+    collection_errors: list[str] = Field(default_factory=list)

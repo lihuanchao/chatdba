@@ -1,7 +1,7 @@
 from typing import TypedDict
 
-from chatdba.db.mysql_collector import MysqlEvidence
-from chatdba.domain.models import RuleFinding, SqlFeatures
+from chatdba.domain.models import EvidenceEnvelope, RuleFinding, SqlFeatures
+from chatdba.domain.report_schema import OptimizationReport
 
 
 class SqlOptimizationState(TypedDict, total=False):
@@ -9,5 +9,6 @@ class SqlOptimizationState(TypedDict, total=False):
     raw_sql: str
     default_schema: str
     sql_features: SqlFeatures
-    evidence: MysqlEvidence
+    evidence: EvidenceEnvelope
     findings: list[RuleFinding]
+    report: OptimizationReport

@@ -1,12 +1,12 @@
 from chatdba.dingtalk.channel import DingTalkInboundMessage
 from chatdba.dingtalk.handler import (
     SQL_OPTIMIZATION_STARTED_MESSAGE,
-    SQL_OPTIMIZATION_SUCCESS_MESSAGE,
     DingTalkSqlOptimizationHandler,
 )
 from chatdba.dingtalk.responder import DingTalkResponder
 from chatdba.dingtalk.stream_runtime import DingTalkStreamRuntime
 from chatdba.domain.models import TaskStatus
+from chatdba.domain.report_schema import OptimizationReport
 from chatdba.tasks.service import OptimizationTaskService
 
 
@@ -24,13 +24,31 @@ class RecordingSender:
         )
 
 
-def test_dingtalk_runtime_runs_sql_optimization_and_streams_replies():
-    def fake_runner(task_payload, collector, progress_sink=None):
+def test_dingtalk_runtime_runs_sql_optimization_and_streams_report():
+    def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
         assert task_payload["raw_sql"] == "select * from orders"
         if progress_sink:
             progress_sink("Parsing SQL\n")
-            progress_sink("Generated diagnostic findings\n")
-        return {"findings": []}
+            progress_sink("Built optimization report\n")
+        return {
+            "report": OptimizationReport.model_validate(
+                {
+                    "task_id": "task-1",
+                    "summary": "Use an index to avoid filesort.",
+                    "confidence": 0.35,
+                    "confidence_label": "low",
+                    "evidence_status": "sql_only",
+                    "missing_evidence": ["route_info", "explain_json", "create_table"],
+                    "limitations": ["No source execution evidence was available."],
+                    "bottlenecks": [{"code": "limit_with_order_by", "evidence": "ORDER BY with LIMIT may require a supporting index."}],
+                    "sql_rewrites": [],
+                    "index_recommendations": [],
+                    "risks": [],
+                    "validation_steps": ["Validate the SQL against the target source database before applying any recommendation."],
+                    "similar_cases": [],
+                }
+            )
+        }
 
     sender = RecordingSender()
     service = OptimizationTaskService(
@@ -57,8 +75,5 @@ def test_dingtalk_runtime_runs_sql_optimization_and_streams_replies():
 
     assert result.task_id == "task-1"
     assert result.status == TaskStatus.COMPLETED
-    assert [message["text"] for message in sender.messages] == [
-        SQL_OPTIMIZATION_STARTED_MESSAGE,
-        "Parsing SQL\nGenerated diagnostic findings\n",
-        SQL_OPTIMIZATION_SUCCESS_MESSAGE,
-    ]
+    assert [message["text"] for message in sender.messages][0] == SQL_OPTIMIZATION_STARTED_MESSAGE
+    assert "Evidence: SQL_ONLY" in sender.messages[-1]["text"]

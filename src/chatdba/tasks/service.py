@@ -4,6 +4,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from chatdba.domain.models import DingTalkContext, SqlOptimizationRequest, TaskStatus
+from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.worker.run_task import ProgressSink, run_sql_optimization_task
 
 
@@ -12,6 +13,7 @@ class OptimizationTaskRunner(Protocol):
         self,
         task_payload: dict[str, object],
         collector,
+        report_composer: OptimizationReportComposer | None = None,
         progress_sink: ProgressSink | None = None,
     ) -> dict[str, object]:
         pass
@@ -30,10 +32,12 @@ class OptimizationTaskService:
         self,
         *,
         collector,
+        report_composer: OptimizationReportComposer | None = None,
         task_runner: OptimizationTaskRunner = run_sql_optimization_task,
         task_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._collector = collector
+        self._report_composer = report_composer
         self._task_runner = task_runner
         self._task_id_factory = task_id_factory or (lambda: str(uuid4()))
 
@@ -55,6 +59,7 @@ class OptimizationTaskService:
             result = self._task_runner(
                 task_payload,
                 self._collector,
+                report_composer=self._report_composer,
                 progress_sink=progress_sink,
             )
         except Exception as exc:
