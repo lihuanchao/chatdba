@@ -75,3 +75,37 @@ select * from orders where user_id = 100;
 select * from orders where user_id = 100;
 ```
 ````
+
+## Real DingTalk Runtime
+
+ChatDBA now includes a real DingTalk transport layer for Stream mode. The runtime
+receives chatbot callback payloads from DingTalk, maps them into
+`DingTalkInboundMessage`, and replies through the inbound `sessionWebhook`.
+
+Start the runtime with:
+
+```bash
+chatdba-dingtalk
+```
+
+Equivalent module form:
+
+```bash
+python -m chatdba.dingtalk.runner
+```
+
+Required settings:
+
+```text
+DINGTALK_STREAM_ENABLED=true
+DINGTALK_CLIENT_ID=replace-with-client-id
+DINGTALK_CLIENT_SECRET=replace-with-client-secret
+```
+
+Current runtime boundary:
+
+- DingTalk transport is real.
+- SQL optimization still uses the current in-process collector wiring.
+- Until a production MySQL collector is configured, SQL requests received from
+  DingTalk will fail with a clear collector configuration message instead of
+  silently pretending to optimize against a real database.
