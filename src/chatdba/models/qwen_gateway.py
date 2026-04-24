@@ -21,3 +21,14 @@ class QwenGateway:
             content = chunk.choices[0].delta.content
             if content:
                 yield content
+
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            stream=False,
+        )
+        return str(response.choices[0].message.content)

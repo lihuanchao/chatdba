@@ -1,10 +1,12 @@
-from chatdba.db.mysql_collector import MysqlEvidence, MysqlTableTarget
+from chatdba.domain.models import ConfidenceLabel, EvidenceEnvelope, EvidenceStatus
+from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.workflow.sql_optimization import build_sql_optimization_graph
 
 
 class FakeCollector:
-    def collect(self, sql, tables: list[MysqlTableTarget]):
-        return MysqlEvidence(
+    def collect(self, sql, tables):
+        return EvidenceEnvelope(
+            status=EvidenceStatus.FULL,
             explain_json={
                 "query_block": {
                     "table": {
@@ -19,7 +21,10 @@ class FakeCollector:
 
 
 def test_workflow_returns_report_payload():
-    graph = build_sql_optimization_graph(collector=FakeCollector())
+    graph = build_sql_optimization_graph(
+        collector=FakeCollector(),
+        report_composer=OptimizationReportComposer(cases=[]),
+    )
 
     result = graph.invoke(
         {
@@ -31,3 +36,5 @@ def test_workflow_returns_report_payload():
 
     assert result["task_id"] == "task-1"
     assert result["findings"][0].code == "full_table_scan"
+    assert result["report"].task_id == "task-1"
+    assert result["report"].confidence_label == ConfidenceLabel.HIGH
