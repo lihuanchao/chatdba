@@ -101,7 +101,7 @@ DINGTALK_STREAM_ENABLED=true
 DINGTALK_CLIENT_ID=replace-with-client-id
 DINGTALK_CLIENT_SECRET=replace-with-client-secret
 DINGTALK_AI_CARD_TEMPLATE_ID=optional-default-template-id
-DINGTALK_AI_CARD_CONTENT_FIELD=msgContent
+DINGTALK_AI_CARD_CONTENT_FIELD=content
 ```
 
 Card template selection supports two modes:
@@ -124,9 +124,9 @@ SQL优化 select * from orders where user_id = 100;
 
 Compatibility note:
 
-- For custom template IDs, ChatDBA uses incremental `put_card_data` updates on the same card instance to provide streaming-like output.
-- `DINGTALK_AI_CARD_CONTENT_FIELD` controls which template parameter receives markdown content (default `msgContent`).
-- If card update fails, ChatDBA automatically degrades to plain text reply in the same conversation.
+- For custom template IDs, ChatDBA follows the same pattern as `dify-on-dingtalk`: create card with `callbackType=STREAM`, then stream updates through `/v1.0/card/streaming`.
+- `DINGTALK_AI_CARD_CONTENT_FIELD` controls the streaming key and template parameter name (default `content`).
+- If card creation or streaming fails, ChatDBA automatically degrades to plain text reply in the same conversation.
 
 ## Metadata Routing And Degraded Analysis
 

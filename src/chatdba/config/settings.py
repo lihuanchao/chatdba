@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     dingtalk_client_secret: str = Field(default="", repr=False)
     dingtalk_stream_enabled: bool = False
     dingtalk_ai_card_template_id: str = ""
-    dingtalk_ai_card_content_field: str = "msgContent"
+    dingtalk_ai_card_content_field: str = "content"
     mysql_connect_timeout_seconds: int = 3
     mysql_query_timeout_seconds: int = 8
     stream_update_interval_ms: int = 1000

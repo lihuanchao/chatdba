@@ -6,7 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 from chatdba.dingtalk.channel import DingTalkInboundMessage
-from chatdba.dingtalk.sender import DingTalkCardStreamingSender, DingTalkSessionWebhookSender
+from chatdba.dingtalk.sender import (
+    DingTalkCardStreamingSender,
+    DingTalkSessionWebhookSender,
+)
 
 
 class RecordingResponse:
@@ -90,7 +93,6 @@ def test_card_streaming_sender_updates_single_card_instance():
             self.incoming_message = incoming_message
             self.started = False
             self.stream_calls = []
-            self.update_calls = []
             self.finished_markdown = None
             self.card_template_id = "default-template"
             self.card_instance_id = "card-1"
@@ -105,14 +107,25 @@ def test_card_streaming_sender_updates_single_card_instance():
         def ai_streaming(self, markdown, append=False):
             self.stream_calls.append((markdown, append))
 
-        def create_and_send_card(self, template_id, card_data):
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
             self.card_template_id = template_id
             self.created_payload = card_data
+            self.callback_type = callback_type
             return "card-1"
 
-        def put_card_data(self, card_instance_id, card_data):
-            self.update_calls.append((card_instance_id, card_data))
-            return {"ok": True}
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+            return None
 
         def ai_finish(self, markdown=None, button_list=None, tips=""):
             self.finished_markdown = markdown
@@ -139,13 +152,14 @@ def test_card_streaming_sender_updates_single_card_instance():
     sender.finish_markdown_stream(message=message, failed=False)
 
     assert state.card_instance.started is False
-    assert state.card_instance.created_payload == {"msgContent": ""}
+    assert state.card_instance.created_payload == {"content": ""}
+    assert state.card_instance.callback_type == "STREAM"
     assert state.card_instance.card_template_id == "custom-template"
-    assert state.card_instance.stream_calls == []
-    assert len(state.card_instance.update_calls) == 3
-    assert state.card_instance.update_calls[0][0] == "card-1"
-    assert state.card_instance.update_calls[0][1]["msgContent"] == "# 标题\n"
-    assert state.card_instance.update_calls[2][1]["msgContent"] == "# 标题\n正文"
+    assert state.card_instance.stream_calls == [
+        ("card-1", "content", "# 标题\n", False, False, False),
+        ("card-1", "content", "# 标题\n正文", False, False, False),
+        ("card-1", "content", "# 标题\n正文", False, True, False),
+    ]
     assert "msg-1" not in sender._states
 
 
@@ -189,7 +203,6 @@ def test_card_streaming_sender_uses_default_template_id_when_message_has_no_over
             self.card_template_id = "sdk-default"
             self.card_instance_id = "card-2"
             self.stream_calls = []
-            self.put_calls = []
 
         def set_title_and_logo(self, title, logo):
             return None
@@ -200,14 +213,25 @@ def test_card_streaming_sender_uses_default_template_id_when_message_has_no_over
         def ai_streaming(self, markdown, append=False):
             self.stream_calls.append((markdown, append))
 
-        def create_and_send_card(self, template_id, card_data):
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
             self.card_template_id = template_id
             self.created_payload = card_data
+            self.callback_type = callback_type
             return "card-2"
 
-        def put_card_data(self, card_instance_id, card_data):
-            self.put_calls.append((card_instance_id, card_data))
-            return {"ok": True}
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+            return None
 
         def ai_finish(self, markdown=None, button_list=None, tips=""):
             return None
@@ -230,9 +254,11 @@ def test_card_streaming_sender_uses_default_template_id_when_message_has_no_over
     sender.send_markdown_chunk(message=message, text="hello")
 
     assert sender._states["msg-3"].card_instance.card_template_id == "env-template"
-    assert sender._states["msg-3"].card_instance.created_payload == {"msgContent": ""}
-    assert sender._states["msg-3"].card_instance.stream_calls == []
-    assert sender._states["msg-3"].card_instance.put_calls[0][1]["msgContent"] == "hello"
+    assert sender._states["msg-3"].card_instance.created_payload == {"content": ""}
+    assert sender._states["msg-3"].card_instance.callback_type == "STREAM"
+    assert sender._states["msg-3"].card_instance.stream_calls == [
+        ("card-2", "content", "hello", False, False, False)
+    ]
 
 
 def test_card_streaming_sender_uses_streaming_api_when_no_template_id():
@@ -284,7 +310,7 @@ def test_card_streaming_sender_uses_streaming_api_when_no_template_id():
     assert sender._states["msg-4"].card_instance.put_calls == []
 
 
-def test_card_streaming_sender_falls_back_to_text_when_card_update_returns_none():
+def test_card_streaming_sender_keeps_card_mode_when_streaming_returns_none():
     seen = {}
 
     def fake_opener(request):
@@ -303,11 +329,19 @@ def test_card_streaming_sender_falls_back_to_text_when_card_update_returns_none(
         def set_title_and_logo(self, title, logo):
             return None
 
-        def create_and_send_card(self, template_id, card_data):
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
             self.card_template_id = template_id
             return "card-5"
 
-        def put_card_data(self, card_instance_id, card_data):
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
             return None
 
     sender = DingTalkCardStreamingSender(
@@ -330,9 +364,7 @@ def test_card_streaming_sender_falls_back_to_text_when_card_update_returns_none(
     sender.send_markdown_chunk(message=message, text="fallback")
     sender.finish_markdown_stream(message=message, failed=False)
 
-    assert len(seen["bodies"]) == 1
-    assert seen["bodies"][0]["msgtype"] == "text"
-    assert seen["bodies"][0]["text"]["content"] == "fallback"
+    assert seen.get("bodies", []) == []
 
 
 def test_card_streaming_sender_aggregates_fallback_text_chunks_and_sends_once():
@@ -354,7 +386,7 @@ def test_card_streaming_sender_aggregates_fallback_text_chunks_and_sends_once():
         def set_title_and_logo(self, title, logo):
             return None
 
-        def create_and_send_card(self, template_id, card_data):
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
             return ""
 
     sender = DingTalkCardStreamingSender(
@@ -381,7 +413,7 @@ def test_card_streaming_sender_aggregates_fallback_text_chunks_and_sends_once():
     assert seen["bodies"][0]["text"]["content"] == "第一段第二段"
 
 
-def test_card_streaming_sender_retries_content_field_when_custom_template_creation_fails():
+def test_card_streaming_sender_prefers_custom_field_in_streaming_payload():
     class FakeChatbotMessage:
         @classmethod
         def from_dict(cls, data):
@@ -392,20 +424,28 @@ def test_card_streaming_sender_retries_content_field_when_custom_template_creati
             self.card_template_id = "sdk-default"
             self.card_instance_id = None
             self.create_calls = []
-            self.update_calls = []
+            self.stream_calls = []
 
         def set_title_and_logo(self, title, logo):
             return None
 
-        def create_and_send_card(self, template_id, card_data):
-            self.create_calls.append((template_id, card_data))
-            if "wrongField" in card_data:
-                return ""
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
+            self.create_calls.append((template_id, card_data, callback_type))
             return "card-6"
 
-        def put_card_data(self, card_instance_id, card_data):
-            self.update_calls.append((card_instance_id, card_data))
-            return {"ok": True}
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+            return None
 
     sender = DingTalkCardStreamingSender(
         dingtalk_client=object(),
@@ -429,10 +469,13 @@ def test_card_streaming_sender_retries_content_field_when_custom_template_creati
     assert state.card_instance.create_calls[0] == (
         "env-template",
         {"wrongField": ""},
+        "STREAM",
     )
-    assert state.card_instance.create_calls[1] == (
-        "env-template",
-        {"msgContent": ""},
+    assert state.card_instance.stream_calls[0] == (
+        "card-6",
+        "wrongField",
+        "hello",
+        False,
+        False,
+        False,
     )
-    assert state.active_content_field == "msgContent"
-    assert state.card_instance.update_calls[0][1] == {"msgContent": "hello"}

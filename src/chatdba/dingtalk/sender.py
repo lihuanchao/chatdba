@@ -63,10 +63,8 @@ class DingTalkSessionWebhookSender:
 class _CardStreamState:
     card_instance: Any
     rendered_markdown: str = ""
-    use_streaming_endpoint: bool = True
     template_id: str | None = None
-    active_content_field: str = "msgContent"
-    content_field_candidates: tuple[str, ...] = ("msgContent",)
+    content_key: str = "content"
 
 
 class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
@@ -79,7 +77,7 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
         card_title: str = "ChatDBA SQL优化",
         default_card_template_id: str | None = None,
         ai_card_status_inputing: Any | None = None,
-        card_content_field: str = "msgContent",
+        card_content_field: str = "content",
         opener: RequestOpener | None = None,
     ) -> None:
         super().__init__(opener=opener)
@@ -89,7 +87,7 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
         self._card_title = card_title
         self._default_card_template_id = (default_card_template_id or "").strip() or None
         self._ai_card_status_inputing = ai_card_status_inputing
-        self._card_content_field = (card_content_field or "msgContent").strip() or "msgContent"
+        self._card_content_field = (card_content_field or "content").strip() or "content"
         self._states: dict[str, _CardStreamState] = {}
         self._text_fallback_buffers: dict[str, str] = {}
 
@@ -110,32 +108,35 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
             state = self._states.get(message.message_id)
             if state is None:
                 template_id = message.card_template_id or self._default_card_template_id
-                card_instance, active_content_field, content_field_candidates = (
-                    self._create_card_instance(message, template_id=template_id)
+                card_instance, content_key = self._create_card_instance(
+                    message, template_id=template_id
                 )
                 state = _CardStreamState(
                     card_instance=card_instance,
-                    use_streaming_endpoint=not bool(template_id),
                     template_id=template_id,
-                    active_content_field=active_content_field,
-                    content_field_candidates=content_field_candidates,
+                    content_key=content_key,
                 )
                 self._states[message.message_id] = state
                 LOGGER.info(
-                    "DingTalk card stream initialized: message_id=%s template_id=%s mode=%s content_field=%s",
+                    "DingTalk card stream initialized: message_id=%s template_id=%s mode=%s content_key=%s",
                     message.message_id,
                     template_id or "<sdk-default>",
-                    "ai_streaming" if state.use_streaming_endpoint else "card_update",
-                    state.active_content_field,
+                    "custom_template_streaming"
+                    if template_id
+                    else "sdk_ai_streaming",
+                    content_key,
                 )
 
             state.rendered_markdown += text
-            if state.use_streaming_endpoint:
-                state.card_instance.ai_streaming(markdown=text, append=True)
+            if state.template_id:
+                self._stream_custom_template(
+                    state=state,
+                    content_value=state.rendered_markdown,
+                    finished=False,
+                    failed=False,
+                )
             else:
-                result = self._update_card_markdown(state, finished=False, failed=False)
-                if result is None:
-                    raise RuntimeError("钉钉卡片更新失败，返回空响应。")
+                state.card_instance.ai_streaming(markdown=text, append=True)
         except Exception as exc:
             self._states.pop(message.message_id, None)
             fallback_text = state.rendered_markdown if state is not None else text
@@ -164,56 +165,84 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
             return
 
         try:
-            if state.use_streaming_endpoint and failed:
+            if state.template_id:
+                final_text = state.rendered_markdown
+                if failed:
+                    final_text = final_text or "SQL 优化任务失败，请查看日志后重试。"
+                    self._stream_custom_template(
+                        state=state,
+                        content_value=final_text,
+                        finished=False,
+                        failed=True,
+                    )
+                else:
+                    self._stream_custom_template(
+                        state=state,
+                        content_value=final_text,
+                        finished=True,
+                        failed=False,
+                    )
+                return
+
+            if failed:
                 state.card_instance.ai_fail()
-                return
-
-            if state.use_streaming_endpoint:
+            else:
                 state.card_instance.ai_finish(markdown=state.rendered_markdown)
-                return
-
-            # 自定义模板使用 put_card_data 收口，避免 flowStatus 与模板字段冲突。
-            self._update_card_markdown(state, finished=True, failed=failed)
         except Exception:
-            return
+            LOGGER.warning(
+                "DingTalk finish_markdown_stream failed: message_id=%s template_id=%s",
+                message.message_id,
+                state.template_id or "<sdk-default>",
+                exc_info=True,
+            )
 
     def _create_card_instance(
         self,
         message: DingTalkInboundMessage,
         *,
         template_id: str | None,
-    ) -> tuple[Any, str, tuple[str, ...]]:
+    ) -> tuple[Any, str]:
         if not message.callback_data:
             raise RuntimeError("缺少回调数据，无法创建钉钉流式卡片。")
+
         incoming_message = self._chatbot_message_cls.from_dict(message.callback_data)
         card_instance = self._card_instance_cls(self._dingtalk_client, incoming_message)
-        if template_id:
-            setattr(card_instance, "card_template_id", template_id)
         card_instance.set_title_and_logo(self._card_title, "")
 
         if template_id:
-            content_field_candidates = self._build_content_field_candidates()
-            for content_field in content_field_candidates:
-                card_instance_id = card_instance.create_and_send_card(
-                    template_id,
-                    {content_field: ""},
-                )
-                if card_instance_id:
-                    setattr(card_instance, "card_instance_id", card_instance_id)
-                    return card_instance, content_field, content_field_candidates
+            setattr(card_instance, "card_template_id", template_id)
+            content_key = self._card_content_field
+            card_instance_id = card_instance.create_and_send_card(
+                template_id,
+                {content_key: ""},
+                callback_type="STREAM",
+            )
+            if not card_instance_id:
+                raise RuntimeError("自定义模板卡片创建失败，未获取到 card_instance_id。")
+            setattr(card_instance, "card_instance_id", card_instance_id)
+            return card_instance, content_key
 
-                LOGGER.warning(
-                    "DingTalk custom card creation returned empty instance id: message_id=%s template_id=%s content_field=%s",
-                    message.message_id,
-                    template_id,
-                    content_field,
-                )
-            raise RuntimeError("自定义模板卡片创建失败，未获取到 card_instance_id。")
-        else:
-            card_instance.ai_start()
-            if not getattr(card_instance, "card_instance_id", None):
-                raise RuntimeError("钉钉卡片初始化失败，未获取到 card_instance_id。")
-        return card_instance, "msgContent", ("msgContent",)
+        card_instance.ai_start()
+        if not getattr(card_instance, "card_instance_id", None):
+            raise RuntimeError("钉钉卡片初始化失败，未获取到 card_instance_id。")
+        return card_instance, "msgContent"
+
+    def _stream_custom_template(
+        self,
+        *,
+        state: _CardStreamState,
+        content_value: str,
+        finished: bool,
+        failed: bool,
+    ) -> None:
+        state.card_instance.streaming(
+            state.card_instance.card_instance_id,
+            content_key=state.content_key,
+            content_value=content_value,
+            append=False,
+            finished=finished,
+            failed=failed,
+        )
 
     def _send_text_fallback(self, message: DingTalkInboundMessage, text: str) -> None:
         self.send_text(
@@ -241,62 +270,3 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
             str(exc) or exc.__class__.__name__,
             exc_info=True,
         )
-
-    def _build_content_field_candidates(self) -> tuple[str, ...]:
-        candidates: list[str] = []
-        for field in (
-            self._card_content_field,
-            "msgContent",
-            "content",
-            "markdown",
-            "text",
-        ):
-            cleaned = field.strip() if field else ""
-            if cleaned and cleaned not in candidates:
-                candidates.append(cleaned)
-        return tuple(candidates)
-
-    def _update_card_markdown(
-        self,
-        state: _CardStreamState,
-        *,
-        finished: bool,
-        failed: bool,
-    ):
-        markdown = state.rendered_markdown
-        if failed:
-            markdown = f"{markdown}\n\n> 本次任务执行失败，请查看日志后重试。"
-        fields_to_try = [state.active_content_field]
-        if not state.use_streaming_endpoint:
-            fields_to_try.extend(
-                field
-                for field in state.content_field_candidates
-                if field != state.active_content_field
-            )
-
-        for content_field in fields_to_try:
-            card_data = {content_field: markdown}
-            if (
-                state.use_streaming_endpoint
-                and not finished
-                and not failed
-                and self._ai_card_status_inputing is not None
-            ):
-                card_data["flowStatus"] = self._ai_card_status_inputing
-
-            result = state.card_instance.put_card_data(
-                state.card_instance.card_instance_id,
-                card_data,
-            )
-            if result is not None:
-                state.active_content_field = content_field
-                return result
-
-            if not state.use_streaming_endpoint:
-                LOGGER.warning(
-                    "DingTalk custom card update returned empty response: card_instance_id=%s template_id=%s content_field=%s",
-                    getattr(state.card_instance, "card_instance_id", ""),
-                    state.template_id,
-                    content_field,
-                )
-        return None

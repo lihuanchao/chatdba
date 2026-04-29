@@ -115,9 +115,9 @@ def build_dingtalk_runtime(
                 getattr(settings, "dingtalk_ai_card_template_id", "") or ""
             ).strip()
             card_content_field = (
-                getattr(settings, "dingtalk_ai_card_content_field", "msgContent")
-                or "msgContent"
-            ).strip() or "msgContent"
+                getattr(settings, "dingtalk_ai_card_content_field", "content")
+                or "content"
+            ).strip() or "content"
             runtime_sender = DingTalkCardStreamingSender(
                 dingtalk_client=client,
                 chatbot_message_cls=chatbot_message_cls,
@@ -203,12 +203,16 @@ def _log_callback_result(result: object, callback_data: dict[str, Any]) -> None:
     message_id = str(callback_data.get("msgId", ""))
     conversation_id = str(callback_data.get("conversationId", ""))
     has_session_webhook = bool(callback_data.get("sessionWebhook"))
+    conversation_type = str(callback_data.get("conversationType", ""))
+    message_type = str(callback_data.get("msgtype", ""))
     accepted = getattr(result, "accepted", None)
     status = getattr(getattr(result, "status", None), "value", None)
     LOGGER.info(
-        "DingTalk callback handled: message_id=%s conversation_id=%s session_webhook=%s accepted=%s status=%s",
+        "DingTalk callback handled: message_id=%s conversation_id=%s conversation_type=%s msgtype=%s session_webhook=%s accepted=%s status=%s",
         message_id,
         conversation_id,
+        conversation_type,
+        message_type,
         has_session_webhook,
         accepted,
         status,
