@@ -4,6 +4,7 @@ from chatdba.domain.models import (
     EvidenceEnvelope,
     EvidenceStatus,
     RuleFinding,
+    SourceRoute,
     SqlFeatures,
 )
 from chatdba.workflow.report_builder import OptimizationReportComposer, _load_system_prompt
@@ -97,6 +98,82 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
 
     assert report.summary == "Use an index to avoid filesort."
     assert report.similar_cases[0].case_id == "case-1"
+
+
+def test_report_builder_selects_cases_by_environment_plan_and_root_cause():
+    composer = OptimizationReportComposer(
+        cases=[
+            OptimizationCase(
+                case_id="generic-case",
+                db_type="mysql",
+                db_version_major="8.0",
+                sql_type="select",
+                scenario_tags=["order_by"],
+                case_card="generic order by case",
+                quality_score=1.0,
+            ),
+            OptimizationCase(
+                case_id="exact-case",
+                db_type="mysql",
+                db_version_major="8.0",
+                sql_type="select",
+                scenario_tags=["order_by", "limit"],
+                plan_symptom_tags=["using_filesort"],
+                root_cause_tags=["missing_composite_index"],
+                case_card="exact filesort missing composite index case",
+                quality_score=0.2,
+            ),
+            OptimizationCase(
+                case_id="wrong-version",
+                db_type="mysql",
+                db_version_major="5.7",
+                sql_type="select",
+                scenario_tags=["order_by", "limit"],
+                plan_symptom_tags=["using_filesort"],
+                root_cause_tags=["missing_composite_index"],
+                case_card="wrong version case",
+                quality_score=1.0,
+            ),
+        ],
+    )
+
+    report = composer.compose(
+        task_id="task-1",
+        raw_sql="select * from orders order by created_at desc limit 20",
+        sql_features=SqlFeatures(
+            fingerprint="fp",
+            statement_type="select",
+            order_by=["created_at DESC"],
+            has_limit=True,
+        ),
+        evidence=EvidenceEnvelope(
+            status=EvidenceStatus.PARTIAL,
+            route=SourceRoute(
+                instance_id="mysql-1",
+                db_type="mysql",
+                version="8.0.36",
+            ),
+            explain_json={
+                "query_block": {
+                    "ordering_operation": {
+                        "using_filesort": True,
+                    }
+                }
+            },
+        ),
+        findings=[
+            RuleFinding(
+                code="limit_with_order_by",
+                severity="medium",
+                message="ORDER BY with LIMIT may require a supporting index.",
+            )
+        ],
+    )
+
+    assert [case.case_id for case in report.similar_cases] == [
+        "exact-case",
+        "generic-case",
+    ]
 
 
 def test_report_builder_loads_markdown_system_prompt_file():

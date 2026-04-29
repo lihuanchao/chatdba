@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Protocol
 
 from chatdba.cases.repository import OptimizationCase
+from chatdba.cases.retriever import retrieve_cases
 from chatdba.domain.models import (
     ConfidenceLabel,
     EvidenceEnvelope,
@@ -84,7 +85,11 @@ class OptimizationReportComposer:
         findings: list[RuleFinding],
     ) -> OptimizationReport | None:
         system_prompt = _load_system_prompt()
-        similar_cases = self._select_cases(sql_features)
+        similar_cases = self._select_cases(
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+        )
         user_prompt = json.dumps(
             {
                 "task_id": task_id,
@@ -116,7 +121,11 @@ class OptimizationReportComposer:
         summary = self._build_summary(findings, evidence.status)
         similar_cases = [
             SimilarCase(case_id=case.case_id, reason=case.case_card)
-            for case in self._select_cases(sql_features)
+            for case in self._select_cases(
+                sql_features=sql_features,
+                evidence=evidence,
+                findings=findings,
+            )
         ]
         sql_rewrites = self._build_sql_rewrites(raw_sql, findings)
         index_recommendations = self._build_index_recommendations(sql_features, findings)
@@ -142,20 +151,23 @@ class OptimizationReportComposer:
             similar_cases=similar_cases,
         )
 
-    def _select_cases(self, sql_features: SqlFeatures) -> list[OptimizationCase]:
-        matched: list[OptimizationCase] = []
-        tags: set[str] = set()
-        if sql_features.order_by:
-            tags.add("order_by")
-        if sql_features.group_by:
-            tags.add("group_by")
-        if sql_features.joins:
-            tags.add("join")
-
-        for case in sorted(self._cases, key=lambda item: item.quality_score, reverse=True):
-            if not case.scenario_tags or tags.intersection(case.scenario_tags):
-                matched.append(case)
-        return matched[:3]
+    def _select_cases(
+        self,
+        *,
+        sql_features: SqlFeatures,
+        evidence: EvidenceEnvelope,
+        findings: list[RuleFinding],
+    ) -> list[OptimizationCase]:
+        return retrieve_cases(
+            self._cases,
+            db_type=_db_type_for(evidence),
+            db_version_major=_db_version_major_for(evidence),
+            sql_type=sql_features.statement_type,
+            scenario_tags=_scenario_tags_for(sql_features),
+            plan_symptom_tags=_plan_symptom_tags_for(evidence, findings),
+            root_cause_tags=_root_cause_tags_for(findings),
+            limit=3,
+        )
 
     def _confidence_for(
         self,
@@ -261,6 +273,122 @@ class OptimizationReportComposer:
         return [
             "先在目标库测试环境执行 EXPLAIN 与回归测试，再决定是否上线。",
         ]
+
+
+def _db_type_for(evidence: EvidenceEnvelope) -> str:
+    if evidence.route and evidence.route.db_type:
+        return evidence.route.db_type
+    return "mysql"
+
+
+def _db_version_major_for(evidence: EvidenceEnvelope) -> str | None:
+    if evidence.route is None or not evidence.route.version:
+        return None
+    version = evidence.route.version.strip()
+    match = re.match(r"^(\d+)(?:\.(\d+))?", version)
+    if not match:
+        return version
+    if match.group(2):
+        return f"{match.group(1)}.{match.group(2)}"
+    return match.group(1)
+
+
+def _scenario_tags_for(sql_features: SqlFeatures) -> list[str]:
+    tags: list[str] = []
+    if sql_features.joins:
+        tags.append("join")
+    if sql_features.group_by:
+        tags.append("group_by")
+    if sql_features.order_by:
+        tags.append("order_by")
+    if sql_features.has_limit:
+        tags.append("limit")
+    return tags
+
+
+def _plan_symptom_tags_for(
+    evidence: EvidenceEnvelope,
+    findings: list[RuleFinding],
+) -> list[str]:
+    tags: set[str] = set()
+    for finding in findings:
+        tags.update(_plan_symptoms_from_finding(finding.code))
+    if evidence.explain_json:
+        tags.update(_collect_plan_terms(evidence.explain_json))
+    return sorted(tags)
+
+
+def _root_cause_tags_for(findings: list[RuleFinding]) -> list[str]:
+    tags: set[str] = set()
+    for finding in findings:
+        tags.update(_root_causes_from_finding(finding.code))
+    return sorted(tags)
+
+
+def _plan_symptoms_from_finding(code: str) -> set[str]:
+    normalized = _normalize_tag(code)
+    mapping = {
+        "limit_with_order_by": {"using_filesort"},
+        "full_table_scan": {"all"},
+        "temporary_table": {"using_temporary"},
+    }
+    return mapping.get(normalized, {normalized} if normalized else set())
+
+
+def _root_causes_from_finding(code: str) -> set[str]:
+    normalized = _normalize_tag(code)
+    mapping = {
+        "limit_with_order_by": {"missing_composite_index"},
+        "full_table_scan": {"missing_index"},
+        "implicit_cast": {"implicit_cast"},
+        "wrong_driving_table": {"wrong_driving_table"},
+    }
+    return mapping.get(normalized, {normalized} if normalized else set())
+
+
+def _collect_plan_terms(value: object) -> set[str]:
+    terms: set[str] = set()
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            normalized_key = _normalize_tag(str(key))
+            if normalized_key in {
+                "using_filesort",
+                "using_temporary",
+                "using_temporary_table",
+                "using_join_buffer",
+            } and nested:
+                if normalized_key == "using_temporary_table":
+                    terms.add("using_temporary")
+                else:
+                    terms.add(normalized_key)
+            if normalized_key in {"access_type", "join_type", "node_type"} and isinstance(nested, str):
+                terms.add(_normalize_tag(nested))
+            terms.update(_collect_plan_terms(nested))
+    elif isinstance(value, list):
+        for item in value:
+            terms.update(_collect_plan_terms(item))
+    elif isinstance(value, str):
+        normalized = _normalize_tag(value)
+        if normalized in {
+            "all",
+            "range",
+            "ref",
+            "index_merge",
+            "using_filesort",
+            "using_temporary",
+            "seq_scan",
+            "nested_loop",
+            "hash_join",
+            "bitmap_heap_scan",
+            "sort",
+            "materialize",
+        }:
+            terms.add(normalized)
+    return terms
+
+
+def _normalize_tag(value: str) -> str:
+    return value.strip().lower().replace(" ", "_")
 
 
 def _rewrite_select_star(sql: str) -> str:
