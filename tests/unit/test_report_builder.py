@@ -6,6 +6,7 @@ from chatdba.domain.models import (
     RuleFinding,
     SourceRoute,
     SqlFeatures,
+    TableReference,
 )
 from chatdba.workflow.report_builder import OptimizationReportComposer, _load_system_prompt
 
@@ -143,6 +144,12 @@ def test_report_builder_selects_cases_by_environment_plan_and_root_cause():
         sql_features=SqlFeatures(
             fingerprint="fp",
             statement_type="select",
+            tables=[
+                TableReference(schema_name="shop", table_name="orders", alias="o"),
+                TableReference(schema_name="shop", table_name="users", alias="u"),
+            ],
+            predicates=["WHERE o.tenant_id = 10001 AND o.status = 1"],
+            joins=["JOIN shop.users AS u ON u.id = o.user_id"],
             order_by=["created_at DESC"],
             has_limit=True,
         ),
@@ -174,6 +181,10 @@ def test_report_builder_selects_cases_by_environment_plan_and_root_cause():
         "exact-case",
         "generic-case",
     ]
+    assert report.index_recommendations[0].ddl == (
+        "CREATE INDEX idx_orders_tenant_id_status_created_at_user_id "
+        "ON orders(tenant_id, status, created_at, user_id);"
+    )
 
 
 def test_report_builder_loads_markdown_system_prompt_file():

@@ -235,18 +235,31 @@ class OptimizationReportComposer:
         if sql_features.order_by and any(
             finding.code == "limit_with_order_by" for finding in findings
         ):
-            order_column = sql_features.order_by[0].split()[0]
-            table_name = sql_features.tables[0].table_name if sql_features.tables else "target_table"
+            table_name = (
+                sql_features.tables[0].table_name
+                if sql_features.tables
+                else "target_table"
+            )
+            index_columns = _recommended_index_columns(sql_features)
+            column_suffix = "_".join(index_columns) if index_columns else "order"
             return [
                 IndexRecommendation(
-                    ddl=f"CREATE INDEX idx_{table_name}_{order_column.lower()} ON {table_name}({order_column});",
+                    ddl=(
+                        f"CREATE INDEX idx_{table_name}_{column_suffix} "
+                        f"ON {table_name}({', '.join(index_columns)});"
+                    ),
                     risk="medium",
                 )
             ]
-        table_name = sql_features.tables[0].table_name if sql_features.tables else "target_table"
+        table_name = (
+            sql_features.tables[0].table_name if sql_features.tables else "target_table"
+        )
         return [
             IndexRecommendation(
-                ddl=f"CREATE INDEX idx_{table_name}_opt ON {table_name}(<where_col1>, <where_col2>);",
+                ddl=(
+                    f"CREATE INDEX idx_{table_name}_opt "
+                    f"ON {table_name}(<where_col1>, <where_col2>);"
+                ),
                 risk="medium",
             )
         ]
@@ -361,7 +374,10 @@ def _collect_plan_terms(value: object) -> set[str]:
                     terms.add("using_temporary")
                 else:
                     terms.add(normalized_key)
-            if normalized_key in {"access_type", "join_type", "node_type"} and isinstance(nested, str):
+            if normalized_key in {"access_type", "join_type", "node_type"} and isinstance(
+                nested,
+                str,
+            ):
                 terms.add(_normalize_tag(nested))
             terms.update(_collect_plan_terms(nested))
     elif isinstance(value, list):
@@ -389,6 +405,69 @@ def _collect_plan_terms(value: object) -> set[str]:
 
 def _normalize_tag(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
+
+
+def _recommended_index_columns(sql_features: SqlFeatures) -> list[str]:
+    if not sql_features.tables:
+        return ["<where_col1>", "<where_col2>"]
+
+    target = sql_features.tables[0]
+    table_alias = target.alias or target.table_name
+    columns: list[str] = []
+    for predicate in sql_features.predicates:
+        columns.extend(_qualified_columns_for(predicate, table_alias, target.table_name))
+    for order_by in sql_features.order_by:
+        column = _first_qualified_column_for(order_by, table_alias, target.table_name)
+        if column:
+            columns.append(column)
+    for join in sql_features.joins:
+        columns.extend(_qualified_columns_for(join, table_alias, target.table_name))
+
+    unique_columns: list[str] = []
+    for column in columns:
+        if column not in unique_columns:
+            unique_columns.append(column)
+    return unique_columns or ["<where_col1>", "<where_col2>"]
+
+
+def _qualified_columns_for(expression: str, alias: str, table_name: str) -> list[str]:
+    qualifiers = {alias, table_name}
+    columns: list[str] = []
+    for qualifier, column in re.findall(
+        r"\b([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)\b",
+        expression,
+    ):
+        if qualifier in qualifiers:
+            columns.append(column)
+    if columns:
+        return columns
+
+    # Single-table SQL often has unqualified columns in WHERE/ORDER BY.
+    if "." not in expression:
+        return [
+            column
+            for column in re.findall(
+                r"\b([A-Za-z_][\w]*)\s*(?:=|>|<|>=|<=|IN\b|LIKE\b)",
+                expression,
+                re.IGNORECASE,
+            )
+            if column.upper() not in {"AND", "OR", "NOT"}
+        ]
+    return []
+
+
+def _first_qualified_column_for(
+    expression: str,
+    alias: str,
+    table_name: str,
+) -> str | None:
+    columns = _qualified_columns_for(expression, alias, table_name)
+    if columns:
+        return columns[0]
+    match = re.search(r"\b([A-Za-z_][\w]*)\b", expression)
+    if match:
+        return match.group(1)
+    return None
 
 
 def _rewrite_select_star(sql: str) -> str:
