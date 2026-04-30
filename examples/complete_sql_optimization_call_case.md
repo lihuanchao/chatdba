@@ -233,7 +233,7 @@ ON CONFLICT (case_id) DO UPDATE SET
   quality_score = EXCLUDED.quality_score;
 ```
 
-注意：当前运行时代码还没有把 `optimization_cases` 自动加载进 `OptimizationReportComposer`，所以上面的入库语句是案例库数据准备示例；`complete_sql_optimization_call_case.py` 使用内存对象注入，方便直接验证检索逻辑。
+注意：当前运行时代码已经会在服务启动时自动加载 `optimization_cases`。如果你希望快速导入一批可用于混合检索验证的案例，可以直接执行 [seed_optimization_cases.sql](/data/chatdba/examples/seed_optimization_cases.sql)。
 
 ## 5. 本地调用
 

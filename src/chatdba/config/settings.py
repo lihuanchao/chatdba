@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     qwen_model: str = "qwen-plus"
     qwen_fallback_model: str = "qwen-max"
     qwen_embedding_model: str = "text-embedding-v4"
+    case_retrieval_vector_top_k: int = 12
+    case_retrieval_candidate_limit: int = 12
     dingtalk_client_id: str = ""
     dingtalk_client_secret: str = Field(default="", repr=False)
     dingtalk_stream_enabled: bool = False

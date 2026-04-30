@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
@@ -11,6 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from chatdba.cases.pgvector_retriever import PgVectorCaseRetriever
+from chatdba.cases.repository import load_optimization_cases
 from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_sql_from_message
 from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.runtime import SqlOnlyCollector
@@ -30,6 +34,7 @@ STREAM_EVENT_HEADERS = {
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
 }
+LOGGER = logging.getLogger(__name__)
 EMPTY_SQL_MESSAGE = (
     "未识别到 SQL，请输入待优化语句，例如：\n"
     "SQL优化\n"
@@ -44,6 +49,47 @@ class CreateOptimizationTaskRequest(BaseModel):
 class CreateOptimizationTaskResponse(BaseModel):
     task_id: str
     status: TaskStatus
+
+
+class TaskServiceProvider:
+    def __init__(
+        self,
+        factory: Callable[[], OptimizationTaskService],
+    ) -> None:
+        self._factory = factory
+        self._lock = threading.Lock()
+        self._service: OptimizationTaskService | None = None
+        self._last_error: str | None = None
+
+    @property
+    def ready(self) -> bool:
+        return self._service is not None
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
+
+    def get(self) -> OptimizationTaskService:
+        if self._service is not None:
+            return self._service
+
+        with self._lock:
+            if self._service is not None:
+                return self._service
+
+            try:
+                self._service = self._factory()
+                self._last_error = None
+            except Exception as exc:
+                self._last_error = str(exc) or exc.__class__.__name__
+                LOGGER.exception("Failed to initialize task service, degrade to SQL-only.")
+                self._service = OptimizationTaskService(
+                    collector=SqlOnlyCollector(
+                        f"自定义能力服务初始化失败，已退化为 SQL-only 分析：{self._last_error}"
+                    ),
+                    report_composer=OptimizationReportComposer(cases=[]),
+                )
+            return self._service
 
 
 def _build_task_service() -> OptimizationTaskService:
@@ -67,19 +113,22 @@ def _safe_load_settings():
     try:
         return Settings()
     except Exception:
+        LOGGER.exception("Failed to load settings, degrade to default SQL-only runtime.")
         return None
 
 
 def _build_report_composer(settings) -> OptimizationReportComposer:
+    cases = _load_cases_from_settings(settings)
     if not settings.qwen_api_key:
-        return OptimizationReportComposer(cases=[])
+        return OptimizationReportComposer(cases=cases)
 
     try:
         from openai import OpenAI
 
         from chatdba.models.qwen_gateway import QwenGateway
     except Exception:
-        return OptimizationReportComposer(cases=[])
+        LOGGER.exception("Failed to import Qwen dependencies, use fallback report composer.")
+        return OptimizationReportComposer(cases=cases)
 
     gateway = QwenGateway(
         client=OpenAI(
@@ -87,8 +136,38 @@ def _build_report_composer(settings) -> OptimizationReportComposer:
             api_key=settings.qwen_api_key,
         ),
         model=settings.qwen_model,
+        embedding_model=getattr(settings, "qwen_embedding_model", None),
     )
-    return OptimizationReportComposer(cases=[], qwen_gateway=gateway)
+    return OptimizationReportComposer(
+        cases=cases,
+        qwen_gateway=gateway,
+        case_retriever=_build_case_retriever(settings, cases, gateway),
+    )
+
+
+def _load_cases_from_settings(settings) -> list:
+    try:
+        cases = load_optimization_cases(settings.database_url)
+    except Exception:
+        LOGGER.exception("Failed to load optimization cases, continue without cases.")
+        return []
+    LOGGER.info("Loaded optimization cases: count=%s", len(cases))
+    return cases
+
+
+def _build_case_retriever(settings, cases, gateway):
+    if not cases:
+        return None
+    database_url = getattr(settings, "database_url", "")
+    if not database_url:
+        return None
+    return PgVectorCaseRetriever(
+        cases=cases,
+        embedding_gateway=gateway,
+        database_url=database_url,
+        vector_top_k=int(getattr(settings, "case_retrieval_vector_top_k", 12)),
+        candidate_limit=int(getattr(settings, "case_retrieval_candidate_limit", 12)),
+    )
 
 
 def _build_configured_collector(settings):
@@ -106,6 +185,7 @@ def _build_configured_collector(settings):
         from chatdba.db.routed_collector import RoutedMysqlEvidenceCollector
         from chatdba.db.runtime_mysql import SourceMysqlConnectionFactory, build_metadata_client
     except Exception:
+        LOGGER.exception("Failed to import MySQL runtime dependencies.")
         return SqlOnlyCollector(
             "已配置元数据库路由，但缺少运行时 MySQL 依赖，已退化为 SQL-only 分析。"
         )
@@ -135,6 +215,7 @@ def _build_configured_collector(settings):
             ),
         )
     except Exception as exc:
+        LOGGER.exception("Failed to initialize metadata router, degrade to SQL-only.")
         return SqlOnlyCollector(
             f"元数据库路由初始化失败：{exc}"
         )
@@ -216,7 +297,10 @@ def _format_sse(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_events_for_sql(raw_sql: str):
+def _stream_events_for_sql(
+    raw_sql: str,
+    service_factory: Callable[[], OptimizationTaskService] = _build_task_service,
+):
     events: queue.Queue[tuple[str, dict[str, object]]] = queue.Queue()
 
     def emit_progress(chunk: str) -> None:
@@ -226,7 +310,7 @@ def _stream_events_for_sql(raw_sql: str):
 
     def run_task() -> None:
         try:
-            service = _build_task_service()
+            service = service_factory()
             execution = service.run_sql(
                 raw_sql=raw_sql,
                 dingtalk_context=DingTalkContext(
@@ -243,6 +327,7 @@ def _stream_events_for_sql(raw_sql: str):
                     events.put(("markdown", {"text": chunk}))
             events.put(("final", _build_final_event(execution)))
         except Exception as exc:
+            LOGGER.exception("Unhandled error while processing /v1/stream task.")
             events.put(("error", {"message": str(exc) or exc.__class__.__name__}))
         finally:
             events.put(("done", {}))
@@ -312,10 +397,21 @@ def _iter_markdown_chunks(markdown: str) -> list[str]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="ChatDBA", version="0.1.0")
+    service_provider = TaskServiceProvider(_build_task_service)
+    app.state.task_service_provider = service_provider
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "service": "chatdba"}
+
+    @app.get("/readyz")
+    def readyz() -> dict[str, object]:
+        return {
+            "status": "ok",
+            "service": "chatdba",
+            "task_service_initialized": service_provider.ready,
+            "last_init_error": service_provider.last_error,
+        }
 
     @app.post(
         "/internal/tasks/sql-optimization",
@@ -333,31 +429,43 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/stream")
     async def dingtalk_graph_stream(request: Request) -> StreamingResponse:
+        def error_stream(code: str, message: str):
+            yield _format_sse("ready", {"status": "accepted"})
+            yield _format_sse("error", {"code": code, "message": message})
+            yield _format_sse("end", {"status": "completed"})
+
         try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
 
-        if not isinstance(payload, dict):
-            payload = {"input": str(payload)}
+            if not isinstance(payload, dict):
+                payload = {"input": str(payload)}
 
-        raw_sql = _extract_sql_from_payload(payload)
-        if not raw_sql:
-            def empty_sql_stream():
-                yield _format_sse("error", {"code": "empty_sql", "message": EMPTY_SQL_MESSAGE})
-                yield _format_sse("end", {"status": "completed"})
+            raw_sql = _extract_sql_from_payload(payload)
+            if not raw_sql:
+                return StreamingResponse(
+                    error_stream("empty_sql", EMPTY_SQL_MESSAGE),
+                    media_type="text/event-stream",
+                    headers=STREAM_EVENT_HEADERS,
+                )
 
             return StreamingResponse(
-                empty_sql_stream(),
+                _stream_events_for_sql(raw_sql, service_provider.get),
                 media_type="text/event-stream",
                 headers=STREAM_EVENT_HEADERS,
             )
-
-        return StreamingResponse(
-            _stream_events_for_sql(raw_sql),
-            media_type="text/event-stream",
-            headers=STREAM_EVENT_HEADERS,
-        )
+        except Exception as exc:
+            LOGGER.exception("Failed before opening /v1/stream response.")
+            return StreamingResponse(
+                error_stream(
+                    "stream_init_failed",
+                    str(exc) or exc.__class__.__name__,
+                ),
+                media_type="text/event-stream",
+                headers=STREAM_EVENT_HEADERS,
+            )
 
     return app
 

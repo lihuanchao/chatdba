@@ -4,9 +4,15 @@ from openai import OpenAI
 
 
 class QwenGateway:
-    def __init__(self, client: OpenAI, model: str) -> None:
+    def __init__(
+        self,
+        client: OpenAI,
+        model: str,
+        embedding_model: str | None = None,
+    ) -> None:
         self._client = client
         self._model = model
+        self._embedding_model = embedding_model
 
     def stream_report(self, system_prompt: str, user_prompt: str) -> Iterator[str]:
         response = self._client.chat.completions.create(
@@ -32,3 +38,12 @@ class QwenGateway:
             stream=False,
         )
         return str(response.choices[0].message.content)
+
+    def embed_text(self, text: str) -> list[float]:
+        if not self._embedding_model:
+            raise RuntimeError("Qwen embedding model is not configured.")
+        response = self._client.embeddings.create(
+            model=self._embedding_model,
+            input=text,
+        )
+        return [float(value) for value in response.data[0].embedding]

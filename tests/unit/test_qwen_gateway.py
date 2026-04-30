@@ -36,6 +36,21 @@ class FakeNonStreamClient:
     chat = type("Chat", (), {"completions": FakeNonStreamCompletions()})()
 
 
+class FakeEmbeddings:
+    def create(self, **kwargs):
+        assert kwargs["model"] == "text-embedding-v4"
+        assert kwargs["input"] == "mysql order by limit"
+        return type(
+            "EmbeddingResponse",
+            (),
+            {"data": [type("EmbeddingItem", (), {"embedding": [0.12, 0.34, 0.56]})()]},
+        )()
+
+
+class FakeEmbeddingClient:
+    embeddings = FakeEmbeddings()
+
+
 def test_gateway_streams_text_chunks():
     gateway = QwenGateway(client=FakeClient(), model="qwen-plus")
 
@@ -46,3 +61,13 @@ def test_gateway_generates_non_stream_report_text():
     gateway = QwenGateway(client=FakeNonStreamClient(), model="qwen-plus")
 
     assert gateway.generate_report("system", "user") == "{\"ok\": true}"
+
+
+def test_gateway_generates_embeddings():
+    gateway = QwenGateway(
+        client=FakeEmbeddingClient(),
+        model="qwen-plus",
+        embedding_model="text-embedding-v4",
+    )
+
+    assert gateway.embed_text("mysql order by limit") == [0.12, 0.34, 0.56]

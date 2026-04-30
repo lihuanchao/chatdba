@@ -1,4 +1,6 @@
 import asyncio
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -121,6 +123,7 @@ def make_settings():
         metadata_mysql_database="",
         metadata_route_table="table_routes",
         metadata_instance_table="db_instances",
+        database_url="",
         qwen_api_key="",
         qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         qwen_model="qwen-plus",
@@ -217,6 +220,51 @@ def test_registered_sdk_callback_handler_acks_even_when_routing_is_not_configure
 
     assert status == "OK"
     assert message == "OK"
+
+
+def test_registered_sdk_callback_handler_acks_before_background_work_finishes():
+    runtime = build_dingtalk_runtime(
+        settings=make_settings(),
+        sender=FakeSender(),
+        sdk_bundle=make_sdk_bundle(),
+    )
+    callback_handler = runtime.client.registrations[0][1]
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_handle(message):
+        started.set()
+        release.wait(timeout=1)
+        return SimpleNamespace(
+            accepted=True,
+            status=SimpleNamespace(value="completed"),
+            task_id="task-slow",
+            send_results=[],
+        )
+
+    runtime.app_handler.handle = slow_handle
+    callback = SimpleNamespace(
+        data={
+            "msgId": "msg-slow",
+            "conversationId": "conv-1",
+            "senderId": "user-1",
+            "sessionWebhook": "https://example.test/webhook",
+            "msgtype": "text",
+            "text": {"content": "SQL优化 select * from orders"},
+        }
+    )
+
+    start = time.monotonic()
+    status, message = asyncio.run(
+        asyncio.wait_for(callback_handler.process(callback), timeout=0.1)
+    )
+    elapsed = time.monotonic() - start
+
+    assert status == "OK"
+    assert message == "OK"
+    assert elapsed < 0.1
+    assert started.wait(timeout=0.2) is True
+    release.set()
 
 
 def test_build_runtime_defaults_to_card_streaming_sender_when_sdk_supports_it():

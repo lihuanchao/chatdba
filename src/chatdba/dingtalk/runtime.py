@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 import logging
+import threading
 from typing import Any
 
 from openai import OpenAI
 
+from chatdba.cases.pgvector_retriever import PgVectorCaseRetriever
+from chatdba.cases.repository import load_optimization_cases
 from chatdba.db.metadata_router import MetadataRouter, MysqlMetadataRouteRepository
 from chatdba.db.routed_collector import RoutedMysqlEvidenceCollector
 from chatdba.db.runtime_mysql import SourceMysqlConnectionFactory, build_metadata_client
@@ -147,10 +150,13 @@ def build_dingtalk_runtime(
                 api_key=settings.qwen_api_key,
             ),
             model=settings.qwen_model,
+            embedding_model=getattr(settings, "qwen_embedding_model", None),
         )
+    cases = _load_cases_from_settings(settings)
     report_composer = OptimizationReportComposer(
         qwen_gateway=qwen_gateway,
-        cases=[],
+        cases=cases,
+        case_retriever=_build_case_retriever(settings, cases, qwen_gateway),
     )
     task_service = OptimizationTaskService(
         collector=runtime_collector,
@@ -180,6 +186,31 @@ def build_dingtalk_runtime(
     )
 
 
+def _load_cases_from_settings(settings) -> list:
+    try:
+        cases = load_optimization_cases(settings.database_url)
+    except Exception:
+        LOGGER.exception("Failed to load optimization cases, continue without cases.")
+        return []
+    LOGGER.info("Loaded optimization cases: count=%s", len(cases))
+    return cases
+
+
+def _build_case_retriever(settings, cases, qwen_gateway):
+    if qwen_gateway is None or not cases:
+        return None
+    database_url = getattr(settings, "database_url", "")
+    if not database_url:
+        return None
+    return PgVectorCaseRetriever(
+        cases=cases,
+        embedding_gateway=qwen_gateway,
+        database_url=database_url,
+        vector_top_k=int(getattr(settings, "case_retrieval_vector_top_k", 12)),
+        candidate_limit=int(getattr(settings, "case_retrieval_candidate_limit", 12)),
+    )
+
+
 def create_sdk_callback_handler(
     *,
     bundle: DingTalkSdkBundle,
@@ -187,16 +218,43 @@ def create_sdk_callback_handler(
 ):
     class CallbackHandler(bundle.stream_module.ChatbotHandler):
         async def process(self, callback):
-            try:
-                result = adapter.handle_callback_data(callback.data)
-            except Exception:
-                LOGGER.exception("Failed to process DingTalk callback.")
-                return bundle.stream_module.AckMessage.STATUS_OK, "OK"
-
-            _log_callback_result(result, callback.data)
+            callback_data = getattr(callback, "data", {}) or {}
+            _start_callback_worker(adapter=adapter, callback_data=callback_data)
             return bundle.stream_module.AckMessage.STATUS_OK, "OK"
 
     return CallbackHandler()
+
+
+def _start_callback_worker(
+    *,
+    adapter: DingTalkStreamChatbotHandler,
+    callback_data: dict[str, Any],
+) -> None:
+    message_id = str(callback_data.get("msgId", ""))
+    worker = threading.Thread(
+        target=_process_callback_worker,
+        kwargs={
+            "adapter": adapter,
+            "callback_data": callback_data,
+        },
+        daemon=True,
+        name=f"chatdba-dingtalk-{message_id or 'callback'}",
+    )
+    worker.start()
+
+
+def _process_callback_worker(
+    *,
+    adapter: DingTalkStreamChatbotHandler,
+    callback_data: dict[str, Any],
+) -> None:
+    try:
+        result = adapter.handle_callback_data(callback_data)
+    except Exception:
+        LOGGER.exception("Failed to process DingTalk callback.")
+        return
+
+    _log_callback_result(result, callback_data)
 
 
 def _log_callback_result(result: object, callback_data: dict[str, Any]) -> None:

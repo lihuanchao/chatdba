@@ -1,4 +1,5 @@
 from chatdba.cases.repository import OptimizationCase
+from chatdba.cases.retriever import CaseRetrievalQuery
 from chatdba.domain.models import (
     ConfidenceLabel,
     EvidenceEnvelope,
@@ -101,6 +102,75 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
     assert report.similar_cases[0].case_id == "case-1"
 
 
+def test_report_builder_backfills_retrieved_cases_when_qwen_omits_them():
+    class FakeQwenGateway:
+        def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+            assert "exact filesort case" in user_prompt
+            return """
+            {
+              "task_id": "task-1",
+              "summary": "Use a composite index to avoid filesort.",
+              "confidence": 0.78,
+              "confidence_label": "medium",
+              "evidence_status": "partial",
+              "missing_evidence": [],
+              "limitations": [],
+              "bottlenecks": [{"code": "limit_with_order_by", "evidence": "Using filesort"}],
+              "sql_rewrites": [{"title": "Rewrite", "sql": "select * from orders"}],
+              "index_recommendations": [{"ddl": "create index idx_orders_created_at on orders(created_at)", "risk": "medium"}],
+              "risks": [],
+              "validation_steps": ["Run EXPLAIN FORMAT=JSON again."],
+              "similar_cases": []
+            }
+            """
+
+    composer = OptimizationReportComposer(
+        qwen_gateway=FakeQwenGateway(),
+        cases=[
+            OptimizationCase(
+                case_id="case-filesort-1",
+                db_type="mysql",
+                db_version_major="8.0",
+                sql_type="select",
+                scenario_tags=["order_by", "limit"],
+                plan_symptom_tags=["using_filesort"],
+                root_cause_tags=["missing_composite_index"],
+                case_card="exact filesort case",
+                quality_score=0.9,
+            )
+        ],
+    )
+
+    report = composer.compose(
+        task_id="task-1",
+        raw_sql="select * from orders order by created_at desc limit 20",
+        sql_features=SqlFeatures(
+            fingerprint="fp",
+            statement_type="select",
+            order_by=["created_at DESC"],
+            has_limit=True,
+        ),
+        evidence=EvidenceEnvelope(
+            status=EvidenceStatus.PARTIAL,
+            route=SourceRoute(
+                instance_id="mysql-1",
+                db_type="mysql",
+                version="8.0.36",
+            ),
+            explain_json={"query_block": {"ordering_operation": {"using_filesort": True}}},
+        ),
+        findings=[
+            RuleFinding(
+                code="limit_with_order_by",
+                severity="medium",
+                message="ORDER BY with LIMIT may require a supporting index.",
+            )
+        ],
+    )
+
+    assert [case.case_id for case in report.similar_cases] == ["case-filesort-1"]
+
+
 def test_report_builder_selects_cases_by_environment_plan_and_root_cause():
     composer = OptimizationReportComposer(
         cases=[
@@ -192,3 +262,67 @@ def test_report_builder_loads_markdown_system_prompt_file():
 
     assert "# ChatDBA SQL优化报告生成提示词（中文）" in prompt
     assert "仅返回合法 JSON" in prompt
+
+
+def test_report_builder_uses_case_retriever_when_available():
+    class RecordingCaseRetriever:
+        def __init__(self):
+            self.query = None
+            self.limit = None
+
+        def retrieve(self, query: CaseRetrievalQuery, *, limit: int):
+            self.query = query
+            self.limit = limit
+            return [
+                OptimizationCase(
+                    case_id="hybrid-case",
+                    db_type="mysql",
+                    db_version_major="8.0",
+                    sql_type="select",
+                    scenario_tags=["order_by", "limit"],
+                    plan_symptom_tags=["using_filesort"],
+                    root_cause_tags=["missing_composite_index"],
+                    case_card="hybrid retrieval case",
+                )
+            ]
+
+    case_retriever = RecordingCaseRetriever()
+    composer = OptimizationReportComposer(
+        cases=[],
+        case_retriever=case_retriever,
+    )
+
+    report = composer.compose(
+        task_id="task-1",
+        raw_sql="select * from orders order by created_at desc limit 20",
+        sql_features=SqlFeatures(
+            fingerprint="fp",
+            statement_type="select",
+            order_by=["created_at DESC"],
+            has_limit=True,
+        ),
+        evidence=EvidenceEnvelope(
+            status=EvidenceStatus.PARTIAL,
+            route=SourceRoute(
+                instance_id="mysql-1",
+                db_type="mysql",
+                version="8.0.36",
+            ),
+            explain_json={"query_block": {"ordering_operation": {"using_filesort": True}}},
+        ),
+        findings=[
+            RuleFinding(
+                code="limit_with_order_by",
+                severity="medium",
+                message="ORDER BY with LIMIT may require a supporting index.",
+            )
+        ],
+    )
+
+    assert [case.case_id for case in report.similar_cases] == ["hybrid-case"]
+    assert case_retriever.query is not None
+    assert case_retriever.query.db_type == "mysql"
+    assert case_retriever.query.db_version_major == "8.0"
+    assert case_retriever.query.sql_type == "select"
+    assert case_retriever.query.plan_symptom_tags == ["using_filesort"]
+    assert case_retriever.limit == 3

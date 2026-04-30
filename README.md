@@ -42,6 +42,18 @@ PYTHON_BIN=/path/to/venv/bin/python ./scripts/run-local-checks.sh
 uvicorn chatdba.app.main:app --reload
 ```
 
+5. Optional: backfill case embeddings for pgvector retrieval:
+
+```bash
+python scripts/backfill_case_embeddings.py --limit 100
+```
+
+6. Optional: import sample optimization cases for retrieval validation:
+
+```bash
+psql "$DATABASE_URL" -f examples/seed_optimization_cases.sql
+```
+
 ## DingTalk E2E Flow
 
 Phase 1 now includes an in-process DingTalk message handling contract:
@@ -102,6 +114,8 @@ DINGTALK_CLIENT_ID=replace-with-client-id
 DINGTALK_CLIENT_SECRET=replace-with-client-secret
 DINGTALK_AI_CARD_TEMPLATE_ID=optional-default-template-id
 DINGTALK_AI_CARD_CONTENT_FIELD=content
+CASE_RETRIEVAL_VECTOR_TOP_K=12
+CASE_RETRIEVAL_CANDIDATE_LIMIT=12
 ```
 
 Card template selection supports two modes:
@@ -157,3 +171,18 @@ Evidence levels in the final report:
 - `full`
 - `partial`
 - `sql_only`
+
+## Hybrid Case Retrieval
+
+ChatDBA now supports optional hybrid case retrieval for SQL optimization history:
+
+- structured rule filtering remains the primary stable path,
+- when `optimization_cases.embedding` has data and Qwen embedding is configured,
+- the runtime adds pgvector TopK recall and merges those hits with rule candidates,
+- if embedding generation or pgvector query fails, retrieval automatically falls back to rule-only mode.
+
+To backfill embeddings for existing historical cases:
+
+```bash
+python scripts/backfill_case_embeddings.py --limit 100
+```

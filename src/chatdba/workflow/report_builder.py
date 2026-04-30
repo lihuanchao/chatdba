@@ -4,7 +4,10 @@ from pathlib import Path
 from typing import Protocol
 
 from chatdba.cases.repository import OptimizationCase
-from chatdba.cases.retriever import retrieve_cases
+from chatdba.cases.retriever import (
+    CaseRetrievalQuery,
+    retrieve_cases_for_query,
+)
 from chatdba.domain.models import (
     ConfidenceLabel,
     EvidenceEnvelope,
@@ -37,15 +40,27 @@ class QwenReportGateway(Protocol):
         raise NotImplementedError
 
 
+class CaseRetriever(Protocol):
+    def retrieve(
+        self,
+        query: CaseRetrievalQuery,
+        *,
+        limit: int,
+    ) -> list[OptimizationCase]:
+        raise NotImplementedError
+
+
 class OptimizationReportComposer:
     def __init__(
         self,
         *,
         cases: list[OptimizationCase],
         qwen_gateway: QwenReportGateway | None = None,
+        case_retriever: CaseRetriever | None = None,
     ) -> None:
         self._cases = cases
         self._qwen_gateway = qwen_gateway
+        self._case_retriever = case_retriever
 
     def compose(
         self,
@@ -103,7 +118,10 @@ class OptimizationReportComposer:
         )
         try:
             payload = self._qwen_gateway.generate_report(system_prompt, user_prompt)
-            return OptimizationReport.model_validate(json.loads(payload))
+            report = OptimizationReport.model_validate(json.loads(payload))
+            if not report.similar_cases and similar_cases:
+                report.similar_cases = _similar_cases_for_report(similar_cases)
+            return report
         except Exception:
             return None
 
@@ -119,14 +137,13 @@ class OptimizationReportComposer:
         confidence, confidence_label = self._confidence_for(evidence.status)
         limitations = self._limitations_for(evidence)
         summary = self._build_summary(findings, evidence.status)
-        similar_cases = [
-            SimilarCase(case_id=case.case_id, reason=case.case_card)
-            for case in self._select_cases(
+        similar_cases = _similar_cases_for_report(
+            self._select_cases(
                 sql_features=sql_features,
                 evidence=evidence,
                 findings=findings,
             )
-        ]
+        )
         sql_rewrites = self._build_sql_rewrites(raw_sql, findings)
         index_recommendations = self._build_index_recommendations(sql_features, findings)
         risks = self._build_risks(evidence.status)
@@ -158,14 +175,16 @@ class OptimizationReportComposer:
         evidence: EvidenceEnvelope,
         findings: list[RuleFinding],
     ) -> list[OptimizationCase]:
-        return retrieve_cases(
+        query = _build_case_retrieval_query(
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+        )
+        if self._case_retriever is not None:
+            return self._case_retriever.retrieve(query, limit=3)
+        return retrieve_cases_for_query(
             self._cases,
-            db_type=_db_type_for(evidence),
-            db_version_major=_db_version_major_for(evidence),
-            sql_type=sql_features.statement_type,
-            scenario_tags=_scenario_tags_for(sql_features),
-            plan_symptom_tags=_plan_symptom_tags_for(evidence, findings),
-            root_cause_tags=_root_cause_tags_for(findings),
+            query,
             limit=3,
         )
 
@@ -338,6 +357,62 @@ def _root_cause_tags_for(findings: list[RuleFinding]) -> list[str]:
     return sorted(tags)
 
 
+def _build_case_retrieval_query(
+    *,
+    sql_features: SqlFeatures,
+    evidence: EvidenceEnvelope,
+    findings: list[RuleFinding],
+) -> CaseRetrievalQuery:
+    db_type = _db_type_for(evidence)
+    db_version_major = _db_version_major_for(evidence)
+    sql_type = sql_features.statement_type
+    scenario_tags = _scenario_tags_for(sql_features)
+    plan_symptom_tags = _plan_symptom_tags_for(evidence, findings)
+    root_cause_tags = _root_cause_tags_for(findings)
+    return CaseRetrievalQuery(
+        db_type=db_type,
+        db_version_major=db_version_major,
+        sql_type=sql_type,
+        scenario_tags=scenario_tags,
+        plan_symptom_tags=plan_symptom_tags,
+        root_cause_tags=root_cause_tags,
+        embedding_text=_case_query_embedding_text(
+            db_type=db_type,
+            db_version_major=db_version_major,
+            sql_type=sql_type,
+            scenario_tags=scenario_tags,
+            plan_symptom_tags=plan_symptom_tags,
+            root_cause_tags=root_cause_tags,
+            sql_features=sql_features,
+        ),
+    )
+
+
+def _case_query_embedding_text(
+    *,
+    db_type: str,
+    db_version_major: str | None,
+    sql_type: str | None,
+    scenario_tags: list[str],
+    plan_symptom_tags: list[str],
+    root_cause_tags: list[str],
+    sql_features: SqlFeatures,
+) -> str:
+    parts = [
+        db_type,
+        db_version_major or "",
+        sql_type or "",
+        " ".join(scenario_tags),
+        " ".join(plan_symptom_tags),
+        " ".join(root_cause_tags),
+        f"tables={len(sql_features.tables or [])}",
+        "predicates=" + " | ".join(sql_features.predicates or []),
+        "joins=" + " | ".join(sql_features.joins or []),
+        "order_by=" + " | ".join(sql_features.order_by or []),
+    ]
+    return " ".join(part for part in parts if part).strip()
+
+
 def _plan_symptoms_from_finding(code: str) -> set[str]:
     normalized = _normalize_tag(code)
     mapping = {
@@ -405,6 +480,13 @@ def _collect_plan_terms(value: object) -> set[str]:
 
 def _normalize_tag(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
+
+
+def _similar_cases_for_report(cases: list[OptimizationCase]) -> list[SimilarCase]:
+    return [
+        SimilarCase(case_id=case.case_id, reason=case.case_card)
+        for case in cases
+    ]
 
 
 def _recommended_index_columns(sql_features: SqlFeatures) -> list[str]:

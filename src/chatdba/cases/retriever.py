@@ -1,4 +1,28 @@
+from dataclasses import dataclass, field
+
 from chatdba.cases.repository import OptimizationCase
+
+
+@dataclass(frozen=True)
+class CaseRetrievalQuery:
+    db_type: str
+    scenario_tags: list[str]
+    db_version_major: str | None = None
+    sql_type: str | None = None
+    plan_symptom_tags: list[str] = field(default_factory=list)
+    root_cause_tags: list[str] = field(default_factory=list)
+    action_tags: list[str] = field(default_factory=list)
+    estimated_rows_bucket: str | None = None
+    tables_count_bucket: str | None = None
+    workload_type: str | None = None
+    embedding_text: str | None = None
+
+
+@dataclass(frozen=True)
+class RetrievalScoreOverride:
+    keyword_score: float | None = None
+    vector_score: float | None = None
+    rerank_score: float | None = None
 
 
 def retrieve_cases(
@@ -15,6 +39,7 @@ def retrieve_cases(
     workload_type: str | None = None,
     limit: int = 5,
     max_same_root_cause: int = 2,
+    score_overrides: dict[str, RetrievalScoreOverride] | None = None,
 ) -> list[OptimizationCase]:
     profile = _RetrievalProfile(
         db_type=_normalize_scalar(db_type),
@@ -28,8 +53,9 @@ def retrieve_cases(
         tables_count_bucket=_normalize_optional(tables_count_bucket),
         workload_type=_normalize_optional(workload_type),
     )
+    score_overrides = score_overrides or {}
     rescored = [
-        (case, _score_case(profile, case))
+        (case, _score_case(profile, case, score_overrides.get(case.case_id)))
         for case in cases
         if _passes_hard_filters(profile, case)
     ]
@@ -42,6 +68,32 @@ def retrieve_cases(
         )
     ]
     return _dedupe_by_root_cause(ranked, limit=limit, max_same_root_cause=max_same_root_cause)
+
+
+def retrieve_cases_for_query(
+    cases: list[OptimizationCase],
+    query: CaseRetrievalQuery,
+    *,
+    limit: int = 5,
+    max_same_root_cause: int = 2,
+    score_overrides: dict[str, RetrievalScoreOverride] | None = None,
+) -> list[OptimizationCase]:
+    return retrieve_cases(
+        cases,
+        db_type=query.db_type,
+        db_version_major=query.db_version_major,
+        sql_type=query.sql_type,
+        scenario_tags=query.scenario_tags,
+        plan_symptom_tags=query.plan_symptom_tags,
+        root_cause_tags=query.root_cause_tags,
+        action_tags=query.action_tags,
+        estimated_rows_bucket=query.estimated_rows_bucket,
+        tables_count_bucket=query.tables_count_bucket,
+        workload_type=query.workload_type,
+        limit=limit,
+        max_same_root_cause=max_same_root_cause,
+        score_overrides=score_overrides,
+    )
 
 
 class _RetrievalProfile:
@@ -90,7 +142,11 @@ def _passes_hard_filters(profile: _RetrievalProfile, case: OptimizationCase) -> 
     return True
 
 
-def _score_case(profile: _RetrievalProfile, case: OptimizationCase) -> float:
+def _score_case(
+    profile: _RetrievalProfile,
+    case: OptimizationCase,
+    score_override: RetrievalScoreOverride | None,
+) -> float:
     environment_score = _environment_score(profile, case)
     shape_score = _tag_overlap_score(profile.scenario_tags, _normalize_set(case.scenario_tags))
     plan_score = _plan_score(profile, case)
@@ -100,9 +156,9 @@ def _score_case(profile: _RetrievalProfile, case: OptimizationCase) -> float:
     )
     retrieval_score = _average(
         [
-            _clamp(case.keyword_score),
-            _clamp(case.vector_score),
-            _clamp(case.rerank_score),
+            _clamp(_effective_score(score_override, "keyword_score", case.keyword_score)),
+            _clamp(_effective_score(score_override, "vector_score", case.vector_score)),
+            _clamp(_effective_score(score_override, "rerank_score", case.rerank_score)),
         ]
     )
     quality_score = _clamp(case.quality_score)
@@ -203,6 +259,19 @@ def _average(values: list[float]) -> float:
 
 def _clamp(value: float) -> float:
     return min(1.0, max(0.0, value))
+
+
+def _effective_score(
+    score_override: RetrievalScoreOverride | None,
+    field_name: str,
+    fallback: float,
+) -> float:
+    if score_override is None:
+        return fallback
+    value = getattr(score_override, field_name)
+    if value is None:
+        return fallback
+    return value
 
 
 def _normalize_set(values: list[str]) -> set[str]:
