@@ -10,7 +10,11 @@ from chatdba.cases.repository import load_optimization_cases
 from chatdba.db.metadata_router import MetadataRouter, MysqlMetadataRouteRepository
 from chatdba.db.routed_collector import RoutedMysqlEvidenceCollector
 from chatdba.db.runtime_mysql import SourceMysqlConnectionFactory, build_metadata_client
-from chatdba.dingtalk.handler import DingTalkSqlOptimizationHandler
+from chatdba.dingtalk.handler import (
+    DingTalkChatDBAHandler,
+    DingTalkFaultDiagnosisHandler,
+    DingTalkSqlOptimizationHandler,
+)
 from chatdba.dingtalk.responder import DingTalkResponder
 from chatdba.dingtalk.sdk_runtime import (
     DingTalkSdkBundle,
@@ -19,6 +23,9 @@ from chatdba.dingtalk.sdk_runtime import (
 )
 from chatdba.dingtalk.sender import DingTalkCardStreamingSender, DingTalkSessionWebhookSender
 from chatdba.models.qwen_gateway import QwenGateway
+from chatdba.fault.runtime import build_fault_diagnosis_runtime
+from chatdba.tasks.fault_service import FaultDiagnosisTaskService
+from chatdba.tasks.repository import PostgresTaskRepository
 from chatdba.tasks.service import OptimizationTaskService
 from chatdba.workflow.report_builder import OptimizationReportComposer
 
@@ -43,7 +50,7 @@ class SqlOnlyCollector:
 class DingTalkSdkRuntime:
     client: Any
     callback_handler: Any
-    app_handler: DingTalkSqlOptimizationHandler
+    app_handler: DingTalkChatDBAHandler
     collector: object
     sender: object
 
@@ -161,11 +168,27 @@ def build_dingtalk_runtime(
     task_service = OptimizationTaskService(
         collector=runtime_collector,
         report_composer=report_composer,
+        task_repository=_build_task_repository(settings),
     )
-    app_handler = DingTalkSqlOptimizationHandler(
+    fault_runtime = build_fault_diagnosis_runtime(settings)
+    fault_task_service = FaultDiagnosisTaskService(
+        top_sql_agent=fault_runtime.top_sql_agent,
+        metric_agent=fault_runtime.metric_agent,
+        qwen_gateway=qwen_gateway,
+    )
+    sql_handler = DingTalkSqlOptimizationHandler(
         task_service=task_service,
         responder=responder,
         stream_interval_ms=settings.stream_update_interval_ms,
+    )
+    fault_handler = DingTalkFaultDiagnosisHandler(
+        task_service=fault_task_service,
+        responder=responder,
+        stream_interval_ms=settings.stream_update_interval_ms,
+    )
+    app_handler = DingTalkChatDBAHandler(
+        sql_handler=sql_handler,
+        fault_handler=fault_handler,
     )
     adapter = DingTalkStreamChatbotHandler(handler=app_handler)
     callback_handler = create_sdk_callback_handler(
@@ -209,6 +232,13 @@ def _build_case_retriever(settings, cases, qwen_gateway):
         vector_top_k=int(getattr(settings, "case_retrieval_vector_top_k", 12)),
         candidate_limit=int(getattr(settings, "case_retrieval_candidate_limit", 12)),
     )
+
+
+def _build_task_repository(settings):
+    database_url = getattr(settings, "database_url", "")
+    if not database_url:
+        return None
+    return PostgresTaskRepository(database_url)
 
 
 def create_sdk_callback_handler(

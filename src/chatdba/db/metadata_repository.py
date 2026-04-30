@@ -9,7 +9,7 @@ class StaticMetadataRepository:
     def resolve_tables(self, tables: list[TableReference]) -> list[MysqlTableTarget]:
         return [
             MysqlTableTarget(
-                schema_name=table.schema_name or self._default_schema,
+                schema_name=table.schema_name,
                 table_name=table.table_name,
             )
             for table in tables

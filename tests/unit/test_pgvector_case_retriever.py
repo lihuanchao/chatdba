@@ -105,6 +105,46 @@ def test_pgvector_case_retriever_falls_back_to_rule_only_when_embedding_fails():
     assert [case.case_id for case in result] == ["rule-case"]
 
 
+def test_pgvector_case_retriever_does_not_vector_filter_on_predicate_profile_tags_only():
+    seen = {}
+
+    def vector_search(*, query, embedding, top_k):
+        seen["scenario_tags"] = query.scenario_tags
+        return [VectorSearchHit(case_id="legacy-case", vector_score=0.98)]
+
+    retriever = PgVectorCaseRetriever(
+        cases=[
+            OptimizationCase(
+                case_id="legacy-case",
+                db_type="mysql",
+                db_version_major="8.0",
+                sql_type="select",
+                scenario_tags=["order_by"],
+                root_cause_tags=["implicit_cast"],
+                case_card="legacy implicit cast case",
+                quality_score=0.9,
+            )
+        ],
+        embedding_gateway=FakeEmbeddingGateway(),
+        vector_search=vector_search,
+    )
+
+    result = retriever.retrieve(
+        CaseRetrievalQuery(
+            db_type="mysql",
+            db_version_major="8.0",
+            sql_type="select",
+            scenario_tags=["where_filter", "equality_predicate"],
+            root_cause_tags=["implicit_cast"],
+            embedding_text="mysql select where implicit cast",
+        ),
+        limit=3,
+    )
+
+    assert seen["scenario_tags"] == []
+    assert [case.case_id for case in result] == ["legacy-case"]
+
+
 def test_build_case_embedding_text_contains_retrieval_signal_fields():
     text = build_case_embedding_text(
         OptimizationCase(

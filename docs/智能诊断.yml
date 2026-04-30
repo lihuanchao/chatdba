@@ -1,0 +1,1204 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: workflow
+  name: 智能诊断_flow_429
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.19@12ddda76bb473f9beb52d2ea2a67412d54924f93a29465fffb8635ba62b409c3
+    version: null
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: ''
+    id: b31080de-140d-4cc4-81de-245908470741
+    name: pass
+    selector:
+    - env
+    - pass
+    value: ''
+    value_type: secret
+  - description: ''
+    id: c494fde5-f5d3-4dfc-ada0-30ef55e131c0
+    name: user
+    selector:
+    - env
+    - user
+    value: RDS_telemonitor
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: tool
+      id: 1769496426626-source-1769496467013-target
+      source: '1769496426626'
+      sourceHandle: source
+      target: '1769496467013'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: tool
+        targetType: llm
+      id: 1769496467013-source-1769496479545-target
+      source: '1769496467013'
+      sourceHandle: source
+      target: '1769496479545'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: agent
+      id: 1769496479545-source-1769496626717-target
+      source: '1769496479545'
+      sourceHandle: source
+      target: '1769496626717'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: agent
+      id: 1769496479545-source-17694967851890-target
+      source: '1769496479545'
+      sourceHandle: source
+      target: '17694967851890'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: agent
+        targetType: code
+      id: 1769496626717-source-1769496885752-target
+      source: '1769496626717'
+      sourceHandle: source
+      target: '1769496885752'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: agent
+        targetType: code
+      id: 17694967851890-source-1769496885752-target
+      source: '17694967851890'
+      sourceHandle: source
+      target: '1769496885752'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: 1769496885752-source-1769496918806-target
+      source: '1769496885752'
+      sourceHandle: source
+      target: '1769496918806'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: llm
+      id: 1769496918806-source-17694969982130-target
+      source: '1769496918806'
+      sourceHandle: source
+      target: '17694969982130'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: 1769495699845-source-1776325504228-target
+      source: '1769495699845'
+      sourceHandle: source
+      target: '1776325504228'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 1776325504228-source-1769496426626-target
+      source: '1776325504228'
+      sourceHandle: source
+      target: '1769496426626'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: end
+      id: 17694969982130-source-1777510492298-target
+      source: '17694969982130'
+      sourceHandle: source
+      target: '1777510492298'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: ''
+          hint: ''
+          label: 输入文本
+          max_length: 256
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: input_text
+      height: 108
+      id: '1769495699845'
+      position:
+        x: 80
+        y: 279.36098417845415
+      positionAbsolute:
+        x: 80
+        y: 279.36098417845415
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        dataset_ids:
+        - Qa3fxOoVMncl2fYsoJGFLDyfM9ScicMqaTcnTXD/AtBw4QDSRnc4PWe6ui5GQeEX
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: gte-rerank
+            provider: langgenius/tongyi/tongyi
+          top_k: 4
+        query_attachment_selector: []
+        query_variable_selector:
+        - '1776325504228'
+        - result
+        retrieval_mode: multiple
+        selected: false
+        title: 知识检索
+        type: knowledge-retrieval
+      height: 89
+      id: '1769496426626'
+      position:
+        x: 418.24428803043963
+        y: 445.8632689662783
+      positionAbsolute:
+        x: 418.24428803043963
+        y: 445.8632689662783
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: '%Y-%m-%d %H:%M:%S'
+          form: form
+          human_description:
+            en_US: Time format in strftime standard.
+            ja_JP: Time format in strftime standard.
+            pt_BR: Time format in strftime standard.
+            zh_Hans: strftime 标准的时间格式。
+          label:
+            en_US: Format
+            ja_JP: Format
+            pt_BR: Format
+            zh_Hans: 格式
+          llm_description: null
+          max: null
+          min: null
+          name: format
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: UTC
+          form: form
+          human_description:
+            en_US: Timezone
+            ja_JP: Timezone
+            pt_BR: Timezone
+            zh_Hans: 时区
+          label:
+            en_US: Timezone
+            ja_JP: Timezone
+            pt_BR: Timezone
+            zh_Hans: 时区
+          llm_description: null
+          max: null
+          min: null
+          name: timezone
+          options:
+          - icon: null
+            label:
+              en_US: UTC
+              ja_JP: UTC
+              pt_BR: UTC
+              zh_Hans: UTC
+            value: UTC
+          - icon: null
+            label:
+              en_US: America/New_York
+              ja_JP: America/New_York
+              pt_BR: America/New_York
+              zh_Hans: 美洲/纽约
+            value: America/New_York
+          - icon: null
+            label:
+              en_US: America/Los_Angeles
+              ja_JP: America/Los_Angeles
+              pt_BR: America/Los_Angeles
+              zh_Hans: 美洲/洛杉矶
+            value: America/Los_Angeles
+          - icon: null
+            label:
+              en_US: America/Chicago
+              ja_JP: America/Chicago
+              pt_BR: America/Chicago
+              zh_Hans: 美洲/芝加哥
+            value: America/Chicago
+          - icon: null
+            label:
+              en_US: America/Sao_Paulo
+              ja_JP: America/Sao_Paulo
+              pt_BR: América/São Paulo
+              zh_Hans: 美洲/圣保罗
+            value: America/Sao_Paulo
+          - icon: null
+            label:
+              en_US: Asia/Shanghai
+              ja_JP: Asia/Shanghai
+              pt_BR: Asia/Shanghai
+              zh_Hans: 亚洲/上海
+            value: Asia/Shanghai
+          - icon: null
+            label:
+              en_US: Asia/Ho_Chi_Minh
+              ja_JP: Asia/Ho_Chi_Minh
+              pt_BR: Ásia/Ho Chi Minh
+              zh_Hans: 亚洲/胡志明市
+            value: Asia/Ho_Chi_Minh
+          - icon: null
+            label:
+              en_US: Asia/Tokyo
+              ja_JP: Asia/Tokyo
+              pt_BR: Asia/Tokyo
+              zh_Hans: 亚洲/东京
+            value: Asia/Tokyo
+          - icon: null
+            label:
+              en_US: Asia/Dubai
+              ja_JP: Asia/Dubai
+              pt_BR: Asia/Dubai
+              zh_Hans: 亚洲/迪拜
+            value: Asia/Dubai
+          - icon: null
+            label:
+              en_US: Asia/Kolkata
+              ja_JP: Asia/Kolkata
+              pt_BR: Asia/Kolkata
+              zh_Hans: 亚洲/加尔各答
+            value: Asia/Kolkata
+          - icon: null
+            label:
+              en_US: Asia/Seoul
+              ja_JP: Asia/Seoul
+              pt_BR: Asia/Seoul
+              zh_Hans: 亚洲/首尔
+            value: Asia/Seoul
+          - icon: null
+            label:
+              en_US: Asia/Singapore
+              ja_JP: Asia/Singapore
+              pt_BR: Asia/Singapore
+              zh_Hans: 亚洲/新加坡
+            value: Asia/Singapore
+          - icon: null
+            label:
+              en_US: Europe/London
+              ja_JP: Europe/London
+              pt_BR: Europe/London
+              zh_Hans: 欧洲/伦敦
+            value: Europe/London
+          - icon: null
+            label:
+              en_US: Europe/Berlin
+              ja_JP: Europe/Berlin
+              pt_BR: Europe/Berlin
+              zh_Hans: 欧洲/柏林
+            value: Europe/Berlin
+          - icon: null
+            label:
+              en_US: Europe/Moscow
+              ja_JP: Europe/Moscow
+              pt_BR: Europe/Moscow
+              zh_Hans: 欧洲/莫斯科
+            value: Europe/Moscow
+          - icon: null
+            label:
+              en_US: Australia/Sydney
+              ja_JP: Australia/Sydney
+              pt_BR: Australia/Sydney
+              zh_Hans: 澳大利亚/悉尼
+            value: Australia/Sydney
+          - icon: null
+            label:
+              en_US: Pacific/Auckland
+              ja_JP: Pacific/Auckland
+              pt_BR: Pacific/Auckland
+              zh_Hans: 太平洋/奥克兰
+            value: Pacific/Auckland
+          - icon: null
+            label:
+              en_US: Africa/Cairo
+              ja_JP: Africa/Cairo
+              pt_BR: Africa/Cairo
+              zh_Hans: 非洲/开罗
+            value: Africa/Cairo
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: select
+        params:
+          format: ''
+          timezone: ''
+        plugin_id: null
+        plugin_unique_identifier: ''
+        provider_icon: /console/api/workspaces/current/tool-provider/builtin/time/icon
+        provider_id: time
+        provider_name: time
+        provider_type: builtin
+        selected: false
+        title: 获取当前时间
+        tool_configurations:
+          format:
+            type: mixed
+            value: '%Y-%m-%d %H:%M:%S'
+          timezone:
+            type: constant
+            value: UTC
+        tool_description: 一个用于获取当前时间的工具。
+        tool_label: 获取当前时间
+        tool_name: current_time
+        tool_node_version: '2'
+        tool_parameters: {}
+        type: tool
+      height: 113
+      id: '1769496467013'
+      position:
+        x: 701.8140600435678
+        y: 313.4352542938317
+      positionAbsolute:
+        x: 701.8140600435678
+        y: 313.4352542938317
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '1769496426626'
+          - result
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: qwen3-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: 49ad0225-a07a-4362-bdf3-7791becb9cda
+          role: system
+          text: "你是一名经验丰富的 **数据库智能运维专家**，负责主导整个数据库故障根因分析（RCA）流程。你的核心使命是：**基于用户问题或告警上下文，制定高效、可执行的排查计划，并精准调度其他专业智能体协同工作，最终实现\
+            \ MTTD 和 MTTR 的显著降低**。\n\n---\n## 核心职责\n- **解析告警输入**：从用户问题或系统告警中提取关键实体（如告警IP、告警指标、指标值、时间范围等）。\n\
+            - **生成结构化排查计划**：按“**拓扑定位 → 指标验证 → 日志取证 → 根因推断**”逻辑制定步骤。\n- **调度专业智能体**：将具体分析任务指派给指标、日志智能体，并提供明确输入参数。\n\
+            - **关联业务上下文**：通过 CMDB 工具将系统名称或告警IP映射到而业务IP、管理IP、系统名称，并将业务IP、管理IP、系统名称等关键信息传递给下游服务。\n\
+            ---\n## 工作流程规范\n1. **第一步：输入信息校验**  \n   - 用户输入问题或告警是否包含系统名称、时间等信息，如不包含则要求用户补充，并提供用户提问样例如：“请分析如下系统的相关实例最近1小时内cpu、内存及其他核心指标情况。\n\
+            系统名称：xxx\n时间：近1小时内“\n2.  **第二步：明确具体时间 **\n   - 经查询当前的上海时间为{{#1769496467013.text#}}\n\
+            \   - 如果用户提供了明确的时间范围(例如：“从10点到11点”，“昨天下午3点到4点之间”)，则根据当前时间转换为详细时间区间后输出（例如：”2025-10-25\
+            \ 10:00:00到2025-10-25 11:00:00 UTC+8“）。\n   - 如果用户提供的是单一的模糊时间点(例如：“10点左右”，“大概10:00的时候”)，则以该时间点作为中心给出前后30分钟的时间区间（例如：“2025-10-25\
+            \ 09:30:00到2025-10-25 10:30:00 UTC+8“）。\n   - 如果用户未提供任何时间信息，则以最近1小时作为时间区间（例如：“2025-10-25\
+            \ 10:00:00到2025-10-25 11:00:00 UTC+8”）。\n   - 时区统一转换为UTC+8，时间格式必须以`YYYY-MM-DD\
+            \ HH:MM:SS`（缺秒补`:00`）输出。\n   - 日志分析智能体仅获取告警时间前后15分钟（共半小时）的数据\n3. **第三步：指派分析任务**\
+            \  \n   - 将指标查询指派给 **指标分析智能体**  \n   - 将日志检索指派给 **日志分析智能体**  \n---\n##\
+            \ 禁止行为\n- 不得自行解析原始指标、日志或调用链数据  \n- 不得跳过拓扑定位直接猜测根因  \n- 不得连续调用同一 CMDB 工具超过\
+            \ 2 次  \n- 不得输出模糊指令，必须明确参数和目标\n---\n## 输出格式\n请以json格式输出，具体格式及字段说明如下：\n\
+            agent_type（string类型）: 当前agent类型，固定值为master。\ndata（object类型）: 具体内容信息集合。\n\
+            plan（array<object>类型）：指定下一步调用哪些智能体来完成目标。\nstep_id（Number类型）: 执行步骤序列号。\n\
+            agent（string）: 下一步调用agent类型，枚举值metric|trace|log。\ndate(string)：时间区间。\n\
+            query_backgroud(string类型)：问题背景描述，用于给下游智能体理解背景。\nquery（string类型）: 希望让智能体具体做什么。\n\
+            reason（string类型）：为什么需要这一步的原因。\nreflection（string类型）：总结当前计划和进度，并明确下一步action。\n\
+            error_message（string类型）： 如果状态失败的话输出错误原因，如果成功的话输出null。\n## 输出示例一\n```\n\
+            {\n  \"agent_type\": \"master\",\n  \"data\": {\n    \"plan\": [\n   \
+            \   {\n        \"step_id\": 1,\n        \"agent\": \"metric\",\n     \
+            \   \"date\": \"2026-1-25 19点到20点\",\n        “query_backgroud”：\"wms轻卡系统2026年1月25日19:52\
+            \ CPU告警原因分析\",\n        \"query\": \"wms轻卡系统所关联的业务IP为xxx，管理IPxxx，请分析该系统数据库服务器在当时的CPU使用率监控指标数据是否有异常，并生成趋势图。\"\
+            ,\n        \"reason\": \"CPU使用率告警可能为数据库内慢查询比较多，需优先验证数据库服务器资源水位和数据库性能是否正常。\"\
+            \n      },\n      {\n        \"step_id\": 2,\n        \"agent\": \"log\"\
+            ,\n        \"date\": \"2026-1-25 19点到20点\",\n        “query_backgroud”：\"\
+            wms轻卡系统2026年1月25日19:52 CPU告警原因分析\",\n        \"query\": \"调用`LOG`agent中的MCP接口查询数据库该时间段的慢日志，管理IPxxx，重点分析queryTimeSum（总耗时）、tsCnt（执行次数）、queryTimeAvg（平均执行时间）\"\
+            ,\n        \"reason\": \"结合数据库慢日志分析结果，确认具体错误类型（如数据库慢SQL过多、数据库连接池耗尽等），为根因提供直接证据。\"\
+            \n      }\n    ],\n    \"reflection\": \"当前计划优先验证基础设施资源（Metric）、数据库慢日志（Log）数据：1)\
+            \ 排除ECS/RDS资源瓶颈；2) 通过日志确认具体错误类型。若Metric显示RDS连接数突增，则可能为数据库性能问题。下一步将根据智能体返回数据交叉验证，逐步收敛根因范围。\"\
+            \n  },\n  \"error_message\": null,\n  \"关联系统\": 从上下文中获取\n}\n```\n## 输出示例二\n\
+            当用户系统名称等关键信息时，应提示如下：\n```\n用户输入缺少必要信息：请补充系统名称等业务上下文。参考提问格式：'请分析如下系统的相关数据库今天10点到11点内的cpu、内存情况。系统名称：xxx\
+            \ '\n```\n---\n## 知识库：\n请记住以下知识，他们可能会对回答问题和根因分析有帮助。\n{{#context#}}"
+        - id: 1165e20d-a043-43ff-814b-3c69fd715524
+          role: user
+          text: '{{#1769495699845.input_text#}}'
+        selected: false
+        title: 数据库智能诊断专家
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1769496479545'
+      position:
+        x: 959.8140600435678
+        y: 341.4352542938317
+      positionAbsolute:
+        x: 959.8140600435678
+        y: 341.4352542938317
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        agent_parameters:
+          instruction:
+            type: constant
+            value: "## 角色\n\n你是数据库TopSQL日志分析专家，专门分析MySQL的TopSQL，通过查询数据库中的监控表，为用户提供TopSQL分析、性能瓶颈排查和优化建议。\n\
+              \n## 上下文\n数据库智能诊断专家的输出{{#1769496479545.text#}}，包含具体的参数\n1. 数据库TopSQL日志存储在threads、events_statements_current表中：\n\
+              \n3. 查询结果按总查询时间降序排列，默认限制5条\n\n## 工作流程\n\n1. **获取数据库连接参数**：从上下文和环境变量中提取以下关键参数，构建**完整连接字符串**：\n\
+              \   格式：msyql://user:pass@host:port/database\n   - user为变量{{#env.user#}}\n\
+              \   - pass为变量{{#env.pass#}}\n   - `host`：数据库主机地址，为管理IP（如'10.187.4.192'）\n\
+              \   - port 默认为8801\n   - database默认为performance_schema\n\n4. **执行查询**：通过数据库查询工具执行SQL语句。\n\
+              \  使用 `ExecuteSQL` 工具，传入以下参数：\n  - `type`： 默认`\"mysql\"`）\n  - `connection_string`：步骤\
+              \ 1 中构建的**完整连接字符串**，不可使用默认的或其他连接串\n  - `sql`：获取当前TopSQL：\n    - **MySQL**:\
+              \  \n      ```SELECT\n    t.PROCESSLIST_DB AS db,\n    t.PROCESSLIST_TIME\
+              \ AS running_seconds,\n    es.SQL_TEXT\nFROM performance_schema.threads\
+              \ t\nJOIN performance_schema.events_statements_current es\n    ON t.THREAD_ID\
+              \ = es.THREAD_ID\nWHERE t.PROCESSLIST_COMMAND != 'Sleep'\n  AND es.SQL_TEXT\
+              \ IS NOT NULL\n  AND t.PROCESSLIST_TIME >= 10\nORDER BY t.PROCESSLIST_TIME\
+              \ DESC\nlimit 10 ;```\n    \n- 保存查询结果用于后续分析。\n5. **结果分析**：对查询结果进行分析：\n\
+              \n   - 识别最耗时的SQL\n   - 分析查询模式（高频查询、长耗时查询）\n   - 提供初步的优化建议\n   - 分析SQL时不分析索引是否合理，只给出正确索引建议\n\
+              \   - 着重分析SQL语句写法\n\n## 限制\n\n1. **结果数量限制**：默认返回最多10条记录，避免结果集过大。\n2.\
+              \ **必填参数**：必须提供`host`参数才能执行查询。\n3. **权限限制**：不能执行其他任何SQL，只能执行要求的SQL。\n\
+              \n\n## 输出格式\n\n请以JSON格式输出，具体格式和字段说明如下：\n\njson\n\n```\n{\n  \"agent_type\"\
+              : \"database_logs\",\n  \"status\": \"success|failure\",\n  \"data\"\
+              : {\n    \"logs\": [\n      {\n        \"sample_query\": \"示例SQL语句\"\
+              ,\n        \"metrics\": {\n          \"host\": \"数据库主机\",\n        \
+              \  \"database\": \"数据库名\",\n        },\n        \"source\": {\n    \
+              \      \"host\": \"主机地址\",\n          \"server_id\": \"服务器ID\"\n   \
+              \     }\n      }\n    ],\n    \"summary\": {\n      \"total_queries\"\
+              : \"总查询次数\",\n      \"total_time\": \"总耗时\",\n      \"avg_query_time\"\
+              : \"平均查询时间\",\n      \"top_performance_issues\": [\"性能问题1\", \"性能问题2\"\
+              ],\n      \"recommendations\": [\"优化建议1\", \"优化建议2\"]\n    }\n  },\n\
+              \  \"survey_summary\": \"简要的分析总结，包括发现的主要问题、可能的原因和优化建议\",\n  \"error_message\"\
+              : \"当status为failure时，输出错误信息\"\n}\n```\n\n## 输出示例\n\njson\n\n```\n{\n\
+              \  \"agent_type\": \"database_logs\",\n  \"status\": \"success\",\n\
+              \  \"data\": {\n    \"logs\": [\n      {\n        \"sample_query\":\
+              \ \"SELECT * FROM users WHERE id = 123 AND status = 'active'\",\n  \
+              \      \"metrics\": {\n          \"host\": \"10.187.4.192\",\n     \
+              \     \"database\": \"user_db\",\n        },\n        \"source\": {\n\
+              \          \"host\": \"10.187.4.192\",\n          \"server_id\": 1\n\
+              \        }\n      }\n    ],\n    \"summary\": {\n      \"top_performance_issues\"\
+              : [\n        \"大量重复的相同模式查询\"\n      ],\n      \"recommendations\": [\n\
+              \        \"在users表的id和status字段上创建复合索引\",\n        \"考虑使用查询缓存或调整查询模式\"\
+              \n      ]\n    }\n  },\n  \"survey_summary\": \"在分析时间段内发现用户表查询性能问题，主要问题是缺少索引导致查询时间过长。建议创建复合索引优化查询性能。\"\
+              \n}\n```\n\n## 注意事项\n1. 确保不暴露敏感信息，如密码、密钥等\n"
+          model:
+            type: constant
+            value:
+              completion_params: {}
+              mode: chat
+              model: qwen3-max
+              model_type: llm
+              provider: langgenius/tongyi/tongyi
+              type: model-selector
+          query:
+            type: constant
+            value: '{{#1769495699845.input_text#}}'
+          tools:
+            type: constant
+            value:
+            - enabled: true
+              extra:
+                description: Execute SQL query on specified database
+              parameters:
+                Authorization:
+                  auto: 1
+                  value: null
+                connection_string:
+                  auto: 1
+                  value: null
+                sql:
+                  auto: 1
+                  value: null
+                type:
+                  auto: 1
+                  value: null
+              provider_name: 41b2147a-cfa9-43f9-a8d4-c4958aeff835
+              provider_show_name: SQL执行器
+              schemas:
+              - auto_generate: null
+                default: null
+                form: llm
+                human_description:
+                  en_US: Authentication credentials
+                  ja_JP: Authentication credentials
+                  pt_BR: Authentication credentials
+                  zh_Hans: Authentication credentials
+                label:
+                  en_US: Authorization
+                  ja_JP: Authorization
+                  pt_BR: Authorization
+                  zh_Hans: Authorization
+                llm_description: Authentication credentials
+                max: null
+                min: null
+                name: Authorization
+                options: []
+                placeholder:
+                  en_US: Authentication credentials
+                  ja_JP: Authentication credentials
+                  pt_BR: Authentication credentials
+                  zh_Hans: Authentication credentials
+                precision: null
+                required: false
+                scope: null
+                template: null
+                type: string
+              - auto_generate: null
+                default: null
+                form: llm
+                human_description:
+                  en_US: SQL query to execute
+                  ja_JP: SQL query to execute
+                  pt_BR: SQL query to execute
+                  zh_Hans: SQL query to execute
+                label:
+                  en_US: sql
+                  ja_JP: sql
+                  pt_BR: sql
+                  zh_Hans: sql
+                llm_description: SQL query to execute
+                max: null
+                min: null
+                name: sql
+                options: []
+                placeholder:
+                  en_US: SQL query to execute
+                  ja_JP: SQL query to execute
+                  pt_BR: SQL query to execute
+                  zh_Hans: SQL query to execute
+                precision: null
+                required: true
+                scope: null
+                template: null
+                type: string
+              - auto_generate: null
+                default: null
+                form: llm
+                human_description:
+                  en_US: Database type (e.g. mysql)
+                  ja_JP: Database type (e.g. mysql)
+                  pt_BR: Database type (e.g. mysql)
+                  zh_Hans: Database type (e.g. mysql)
+                label:
+                  en_US: type
+                  ja_JP: type
+                  pt_BR: type
+                  zh_Hans: type
+                llm_description: Database type (e.g. mysql)
+                max: null
+                min: null
+                name: type
+                options: []
+                placeholder:
+                  en_US: Database type (e.g. mysql)
+                  ja_JP: Database type (e.g. mysql)
+                  pt_BR: Database type (e.g. mysql)
+                  zh_Hans: Database type (e.g. mysql)
+                precision: null
+                required: true
+                scope: null
+                template: null
+                type: string
+              - auto_generate: null
+                default: null
+                form: llm
+                human_description:
+                  en_US: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                  ja_JP: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                  pt_BR: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                  zh_Hans: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                label:
+                  en_US: connection_string
+                  ja_JP: connection_string
+                  pt_BR: connection_string
+                  zh_Hans: connection_string
+                llm_description: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                max: null
+                min: null
+                name: connection_string
+                options: []
+                placeholder:
+                  en_US: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                  ja_JP: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                  pt_BR: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                  zh_Hans: connection_string (e.g. mysql://username:password@localhost:3306/mydatabase)
+                precision: null
+                required: true
+                scope: null
+                template: null
+                type: string
+              settings: {}
+              tool_description: Execute SQL query on specified database
+              tool_label: ExecuteSQL
+              tool_name: ExecuteSQL
+              type: api
+        agent_strategy_label: ReAct
+        agent_strategy_name: ReAct
+        agent_strategy_provider_name: langgenius/agent/agent
+        meta:
+          minimum_dify_version: 1.7.0
+          version: 0.0.2
+        output_schema: {}
+        plugin_unique_identifier: langgenius/agent:0.0.30@8e6a5ed91535194ff84d1e6917f7fc81c3e063237245fc959fd6047991ce8e71
+        selected: false
+        title: LOG
+        tool_node_version: '2'
+        type: agent
+      height: 187
+      id: '1769496626717'
+      position:
+        x: 1242.339192709634
+        y: 136.32724056580219
+      positionAbsolute:
+        x: 1242.339192709634
+        y: 136.32724056580219
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        agent_parameters:
+          instruction:
+            type: constant
+            value: "## 角色\n你是Metric监控数据获取智能体，通过给定的输入从Metric时序库中获取时序数据，并且按照指定格式输出查询内容。\n\
+              \n## 上下文\n请记住知识库信息，可能会对回答问题有帮助：\n{{#1769496479545.text#}}\n{{#1769496426626.result#}}\n\
+              当用户提出关于服务器状态或系统问题时，获取CPU 使用率、数据库活跃线程数指标，请按以下步骤处理：\n\n1. **理解意图**：从上下文中提取用户关心的指标类型、目标主机（请区分业务IP和管理IP）、时间范围（默认最近\
+              \ 10 分钟）。\n2. **构造 PromQL**：基于 Node Exporter 标准指标编写正确的 PromQL 表达式。例如：\n\
+              \   - CPU 使用率（非 idle）: `100 - (avg by(ip) (rate(node_cpu_seconds_total{mode=\"\
+              idle\", ip=\"{{ip}}\"}[10m])) * 100)`，获取CPU指标需传入业务IP\n   - 数据库活跃线程数：`query=ctg_paas_30202624250003{sysCode=\"\
+              database_prod\",tenant_id=\"100011\",ip=\"{{ip}}\"}`,获取数据库活跃线程数需传入管理IP\n\
+              \  \n   - 如果需要范围查询请从上下文从提取起始时间，参数格式为YYYY-MM-DDThh:mm:ssZ，请注意：用户输入的时区和监控工具的时区均为东八区，请用时区转换工具转换为UTC+0时间；step默认为60s。\n\
+              \n3. **通过 MCP 调用工具**：\n   - 如果是范围查询请调用`execute_range_query`\n   - 参数：`{\"\
+              query\": \"你的 PromQL 表达式\",\"start\":\"起始时间格式YYYY-MM-DDThh:mm:ssZ\"\
+              ,\"end\":\"终止时间格式YYYY-MM-DDThh:mm:ssZ\",\"step\":\"间隔，默认60s\"}`\n  \
+              \ - 使用标准 MCP指令发起调用，不要自行模拟结果。\n\n4. **解析并回答**：\n   - 若工具返回成功，将数值转换为易读格式（如\
+              \ GB、百分比、MB/s）；\n   - 若返回空或错误，告知用户“未找到相关数据”或“主机可能未被监控”；\n   - 始终用中文简洁清晰地回复。\n\
+              \n\U0001F4CC 注意：\n- 所有计数器（counter）类指标必须使用 `rate()` 或 `irate()`。\n- 不要编造数据，必须依赖工具返回结果。\n\
+              - 生成PromQL时，使用ip，不使用instance。\n- 一定要先获取所有工具列表，再决定调用哪个工具，不能随意调用不存在的工具。\n\
+              - 一定要正确调用已知的工具。\n- 每个指标分别调用查询工具\n- 只获取CPU使用率即可\n- 指标获取仅获取故障时间前后15分钟（共半小时）的数据\n\
+              \n## 输出格式\n请以json格式输出，并将字符串中所有的\\n转义字符移除后再输出，具体格式和字段说明如下：\n- agent_type(string\
+              \ 类型): 当前agent类型，固定值为metric\n- status(string类型)：当前步骤的执行状态，判断依据为是否成功获取到数据，枚举值\
+              \ success | failure\n- summary(string类型)：对当前调查进展的总结，并给出对于数据查询结果的分析建议\n\
+              - data(object类型): 具体内容的信息集合\n- metrics(array<object>类型): Metric指标集合，其中每个指标都是一串时序数据\n\
+              - unit(string类型): 监控数据单元，如果有则补充,\n- ip(string类型):服务器IP地址\n- values(array<object>类型):\
+              \ Metric指标的时序数据\n- timestamp(date类型): 监控时间，单位为秒\n- value(number): 监控的数据\n\
+              - error_message(string类型): 当status为failure时，请以英文输出报错信息\n\n## 输出示例\n\
+              ```json\n{\n    \"agent_type\": \"metric\",\n    \"status\": \"success\"\
+              ,\n    \"summary\": \"我已经成功获取了系统XX的数据库服务器XXXCPU使用率数据\",\n    \"data\"\
+              : {\n        \"metrics\": [\n            {\n                \"ip\":\
+              \ \"10.186.17.54\"\n                \"unit\": \"%\",\n             \
+              \   \"values\": [\n                    {\n                        \"\
+              timestamp\": 1758023820,\n                        \"value\": 63.7\n\
+              \                    }\n                ]\n            }\n        ]\n\
+              \    }\n}\n```"
+          mcp_prompts_as_tools:
+            type: constant
+            value: true
+          mcp_resources_as_tools:
+            type: constant
+            value: true
+          mcp_servers_config:
+            type: constant
+            value: '{    "Prometheus_MCP": {    "url": "http://10.186.42.51:8080/sse",    "headers":
+              {}, "timeout": 50,    "sse_read_timeout": 50  } }'
+          model:
+            type: constant
+            value:
+              completion_params: {}
+              mode: chat
+              model: qwen3-max
+              model_type: llm
+              provider: langgenius/tongyi/tongyi
+              type: model-selector
+          query:
+            type: constant
+            value: '{{#1769495699845.input_text#}}'
+          tools:
+            type: constant
+            value:
+            - enabled: true
+              extra:
+                description: 时区转换
+              parameters:
+                current_time:
+                  auto: 1
+                  value: null
+                current_timezone:
+                  auto: 1
+                  value: null
+                target_timezone:
+                  auto: 1
+                  value: null
+              provider_name: time
+              provider_show_name: time
+              schemas:
+              - auto_generate: null
+                default: null
+                form: llm
+                human_description:
+                  en_US: current time, such as 2024-1-1 0:0:0
+                  ja_JP: current time, such as 2024-1-1 0:0:0
+                  pt_BR: current time, such as 2024-1-1 0:0:0
+                  zh_Hans: 当前时间，比如 2024-1-1 0:0:0
+                label:
+                  en_US: current time
+                  ja_JP: current time
+                  pt_BR: current time
+                  zh_Hans: 当前时间
+                llm_description: null
+                max: null
+                min: null
+                name: current_time
+                options: []
+                placeholder: null
+                precision: null
+                required: true
+                scope: null
+                template: null
+                type: string
+              - auto_generate: null
+                default: Asia/Shanghai
+                form: llm
+                human_description:
+                  en_US: Current Timezone, such as Asia/Shanghai
+                  ja_JP: Current Timezone, such as Asia/Shanghai
+                  pt_BR: Current Timezone, such as Asia/Shanghai
+                  zh_Hans: 当前时区，比如 Asia/Shanghai
+                label:
+                  en_US: Current Timezone
+                  ja_JP: Current Timezone
+                  pt_BR: Current Timezone
+                  zh_Hans: 当前时区
+                llm_description: null
+                max: null
+                min: null
+                name: current_timezone
+                options: []
+                placeholder: null
+                precision: null
+                required: true
+                scope: null
+                template: null
+                type: string
+              - auto_generate: null
+                default: Asia/Tokyo
+                form: llm
+                human_description:
+                  en_US: Target Timezone, such as Asia/Tokyo
+                  ja_JP: Target Timezone, such as Asia/Tokyo
+                  pt_BR: Target Timezone, such as Asia/Tokyo
+                  zh_Hans: 目标时区，比如 Asia/Tokyo
+                label:
+                  en_US: Target Timezone
+                  ja_JP: Target Timezone
+                  pt_BR: Target Timezone
+                  zh_Hans: 目标时区
+                llm_description: null
+                max: null
+                min: null
+                name: target_timezone
+                options: []
+                placeholder: null
+                precision: null
+                required: true
+                scope: null
+                template: null
+                type: string
+              settings: {}
+              tool_description: 时区转换
+              tool_label: 时区转换
+              tool_name: timezone_conversion
+              type: builtin
+        agent_strategy_label: ReAct (支持 MCP 工具)
+        agent_strategy_name: mcp_sse_ReAct
+        agent_strategy_provider_name: junjiem/mcp_see_agent/mcp_see_agent
+        meta:
+          minimum_dify_version: null
+          version: 0.0.1
+        output_schema: {}
+        plugin_unique_identifier: junjiem/mcp_see_agent:0.2.4@82caf96890992e9dec2c43c3fac82bfce8bd18a41de7c2b6948151b2d7f7b7a2
+        selected: false
+        title: metric
+        tool_node_version: '2'
+        type: agent
+      height: 187
+      id: '17694967851890'
+      position:
+        x: 1250.339192709634
+        y: 528.121265723663
+      positionAbsolute:
+        x: 1250.339192709634
+        y: 528.121265723663
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "\ndef main(arg1: str, arg2: str):\n    return {\n        \"result\"\
+          : arg1 + arg2,\n    }\n"
+        code_language: python3
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 代码执行
+        type: code
+        variables:
+        - value_selector:
+          - '17694967851890'
+          - text
+          value_type: string
+          variable: arg1
+        - value_selector:
+          - '1769496626717'
+          - text
+          value_type: string
+          variable: arg2
+      height: 51
+      id: '1769496885752'
+      position:
+        x: 1609.003164647692
+        y: 363.4352542938317
+      positionAbsolute:
+        x: 1609.003164647692
+        y: 363.4352542938317
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '1769496885752'
+          - result
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: qwen3-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: 76548745-0be0-45a0-83b3-dbac3482f9b4
+          role: system
+          text: "你是一名资深 **数据库 值班长**，负责在多智能体 RCA 流程中进行**关键判断与决策仲裁**。你不主动获取新数据，而是基于已有证据（来自指标、日志及\
+            \ CMDB 工具的返回结果）进行结构化推理，识别矛盾、填补逻辑缺口，并在分析停滞时推动流程前进。\n\n## 上下文信息\n{{#context#}}\
+            \ \n- 经查询当前的上海时间为{{#1769496467013.text#}}，可以结合时间维度分析\n---\n## 核心职责\n-\
+            \ **证据整合**：将各智能体返回的碎片化信息（如“服务器CPU 高”、“日志中存在慢SQL”）关联成统一因果链。\n- **逻辑校验**：检查当前分析路径是否存在矛盾（如“无慢SQL但\
+            \ CPU 高”可能指向非业务进程）或证据缺失（如未确认资源归属）。\n- **决策干预**：当连续两步无实质性进展，或多个根因假设并存时，提出明确判断或建议新排查方向。\n\
+            - **关联业务上下文**：通过 CMDB 工具将系统映射到IP维度，以强化业务视角的归因。\n---\n## 决策触发条件（满足任一即介入）\n\
+            - 指标、日志结论相互冲突；\n- 当前根因假设缺乏关键支撑证据（如怀疑 DB 问题但未查 数据库 指标）；\n- 连续两个分析步骤未缩小根因范围；\n\
+            - CMDB 信息未被有效利用（如已知IP 但未关联到系统）。\n---\n## 推理原则\n1. **优先业务影响**：根因应能解释告警中的指标异常（如CPU使用率过高）。\n\
+            2. **依赖拓扑优先**：结合 CMDB 返回的服务依赖关系（如 A → 服务器 → 数据库），按调用链反向排查。\n3. **奥卡姆剃刀**：在多个可能根因中，优先选择能解释最多现象的单一原因。\n\
+            4. **显性化思维**：每条结论必须附带推理依据，例如：\n   > “根因很可能是 数据库 慢SQL过多，因为：(1) 日志显示大量 慢SQL；(2)\
+            \ 服务器CPU使用率过高。”\n---\n## 禁止行为\n- 不得发起新的数据查询或工具调用；\n- 不得忽略 CMDB 提供的系统、业务IP、管理IP上下文；\n\
+            - 不得输出模糊结论（如“可能有多个问题”），必须给出优先级判断；\n- 不得重复已有分析步骤，应提出新视角或终止无效路径；\n- 不得连续调用同一\
+            \ CMDB 工具超过 2 次。\n---\n## 输出格式\n以 **结构化 Markdown** 输出决策结论，包含：\n```markdown\n\
+            ### 决策结论\n{明确的根因判断或下一步建议}\n### 推理依据\n- **证据1**：{来源智能体 + 关键数据}\n- **证据2**：{CMDB\
+            \ 上下文，如“服务器XXX属于系统`yyy`”}\n- **逻辑链**：{如何从证据推导出结论}\n### 后续建议\n- 若证据充分：建议进入“最终输出”阶段；\n\
+            - 若仍存疑：建议调用 {具体智能体} 补充 {具体数据}。\n"
+        - id: bcb2d334-7d01-4464-ae3e-12e71cfae1f5
+          role: user
+          text: '{{#1769495699845.input_text#}}'
+        selected: false
+        title: 值班长
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1769496918806'
+      position:
+        x: 1911.4507422970905
+        y: 341.4352542938317
+      positionAbsolute:
+        x: 1911.4507422970905
+        y: 341.4352542938317
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '1769496918806'
+          - text
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: qwen3-max
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: 76548745-0be0-45a0-83b3-dbac3482f9b4
+          role: system
+          text: '你是一名专业的数据库AIOps根因分析运营专家，负责对系统告警事件问题进行总结与结构化输出。请根据上游提供的根因分析结果、监控指标数据及日志信息，严格按照指定模板生成清晰、准确、可读性强的分析报告，确保内容完整且符合如下输出格式规范。
+
+
+            ##上下文
+
+            上下文中包含监控指标数据及日志信息，请结合分析{{#1769496885752.result#}}{{#context#}}{{#1769496479545.text#}}/
+
+
+            ## 要求
+
+            1. 所有时间统一采用“YYYY-MM-DD HH:mm:ss”格式；
+
+            2. 经查询当前的时间为{{#1769496467013.text#}}，请结合当前时间及问题发生时间进行输出。
+
+            2. 涉及IP、业务系统等关键信息需准确无误；
+
+            3. 监控发现部分必须以表格形式直观呈现，并附趋势描述（如“连接数在10:35达到峰值并持续高负载”）；
+
+            4. 日志示例需真实反映异常特征和关键报错信息；
+
+            5. 原因分类应从基础设施、网络、中间件、应用、配置、第三方依赖等维度准确归类；
+
+            6. 优化建议需具体、可落地，优先考虑自动化、容灾、监控覆盖等方面；
+
+            7. 输出内容前校验输出格式必须按照“输出格式样例规范”进行内容输出；
+
+            8. 不得捏造信息。
+
+            9. 受影响业务系统一定要从上下文中获取到
+
+
+            ## 输出格式样例规范
+
+            ### 一、问题简述
+
+            2025-09-1510:30:45 XX系统(从上下文中获取系统名称)出现告警：{{#1769495699845.input_text#}}。原因是当时活跃会话较多。
+
+            【受影响业务系统】从上下文中获取
+
+            ### 二、影响概述
+
+            【故障影响时间】为CPU高于80%的时间段
+
+            【风险评估】活跃会话较多可能会导致数据库整体卡顿，影响用户操作。
+
+            ### 三、问题原因
+
+            【原因分类】
+
+            数据库会话过多。
+
+            【原因概述】
+
+            用户查询数据量多大，并且一直进行深度分页查询。
+
+            ### 四、问题分析及优化建议
+
+            【故障根因】
+
+            当前时段单一功能执行会话较多。
+
+            【监控发现】（#输出内容请以表格方式并添加监控趋势图）
+
+            1. CPU使用率升高。
+
+            2. 日志出现大量慢SQL。（#补充耗时最长的慢SQL）
+
+            【暴露问题】
+
+            无SQL限流机制
+
+            【优化建议】
+
+            1. 增加SQL限流
+
+            2. 优化系统数据库慢SQL'
+        - id: bcb2d334-7d01-4464-ae3e-12e71cfae1f5
+          role: user
+          text: '{{#1769495699845.input_text#}}'
+        selected: false
+        title: 运营专家
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '17694969982130'
+      position:
+        x: 2169.3889852507514
+        y: 313.4352542938317
+      positionAbsolute:
+        x: 2169.3889852507514
+        y: 313.4352542938317
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "import re\n\ndef main(arg1: str):\n    \n    \n    # 提取第一个 IPv4 地址\n\
+          \    match = re.search(r'\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b', arg1)\n    ip\
+          \ = match.group(0) if match else \"\"\n    \n    return {\n        \"result\"\
+          : ip,\n    }"
+        code_language: python3
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 提取IP
+        type: code
+        variables:
+        - value_selector:
+          - '1769495699845'
+          - input_text
+          value_type: string
+          variable: arg1
+      height: 51
+      id: '1776325504228'
+      position:
+        x: 328.24428803043963
+        y: 148.0022800659243
+      positionAbsolute:
+        x: 328.24428803043963
+        y: 148.0022800659243
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        outputs:
+        - value_selector:
+          - '17694969982130'
+          - text
+          value_type: string
+          variable: text
+        selected: true
+        title: 输出
+        type: end
+      height: 88
+      id: '1777510492298'
+      position:
+        x: 2687.9816248746606
+        y: 321.9352542938317
+      positionAbsolute:
+        x: 2687.9816248746606
+        y: 321.9352542938317
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: -921.9908124373312
+      y: 60.03237285308404
+      zoom: 0.5000000000000003
+  rag_pipeline_variables: []

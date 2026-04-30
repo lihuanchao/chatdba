@@ -13,6 +13,31 @@ def test_retrieve_cases_filters_by_db_type_and_tag():
     assert [case.case_id for case in result] == ["case-1"]
 
 
+def test_retrieve_cases_does_not_hard_filter_on_predicate_profile_tags_only():
+    cases = [
+        OptimizationCase(
+            case_id="legacy-case",
+            db_type="mysql",
+            sql_type="select",
+            scenario_tags=["order_by"],
+            root_cause_tags=["implicit_cast"],
+            case_card="legacy implicit cast case",
+            quality_score=0.9,
+        )
+    ]
+
+    result = retrieve_cases(
+        cases,
+        db_type="mysql",
+        sql_type="select",
+        scenario_tags=["where_filter", "equality_predicate"],
+        root_cause_tags=["implicit_cast"],
+        limit=3,
+    )
+
+    assert [case.case_id for case in result] == ["legacy-case"]
+
+
 def test_retrieve_cases_ranks_by_quality_score_descending():
     cases = [
         OptimizationCase(case_id="case-1", db_type="mysql", scenario_tags=["order_by"], case_card="lower score", quality_score=0.4),

@@ -13,7 +13,12 @@ class RoutedMysqlEvidenceCollector:
         sql: str,
         tables: list[MysqlTableTarget],
     ) -> EvidenceEnvelope:
-        route_envelope = self._router.resolve(tables)
+        resolve_with_tables = getattr(self._router, "resolve_with_tables", None)
+        if callable(resolve_with_tables):
+            route_envelope, resolved_tables = resolve_with_tables(tables)
+        else:
+            route_envelope = self._router.resolve(tables)
+            resolved_tables = tables
         if route_envelope.route is None:
             return route_envelope
 
@@ -32,7 +37,7 @@ class RoutedMysqlEvidenceCollector:
             collection_errors.append(f"执行计划采集失败：{exc}")
 
         try:
-            create_tables = collector.collect_create_tables(tables)
+            create_tables = collector.collect_create_tables(resolved_tables)
         except Exception as exc:
             missing_evidence.append("create_table")
             collection_errors.append(f"建表语句采集失败：{exc}")

@@ -10,11 +10,13 @@ class MysqlClient(Protocol):
 
 
 class MysqlTableTarget(BaseModel):
-    schema_name: str
+    schema_name: str | None = None
     table_name: str
 
     @property
     def qualified_name(self) -> str:
+        if not self.schema_name:
+            return self.table_name
         return f"{self.schema_name}.{self.table_name}"
 
 
@@ -63,6 +65,8 @@ class MysqlEvidenceCollector:
     ) -> dict[str, str]:
         create_tables: dict[str, str] = {}
         for table in tables:
+            if not table.schema_name:
+                raise RuntimeError(f"表 {table.table_name} 缺少 schema_name，无法采集建表语句。")
             row = self._client.query_one(
                 "SHOW CREATE TABLE "
                 f"{_quote_mysql_identifier(table.schema_name)}."

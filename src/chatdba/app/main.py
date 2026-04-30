@@ -16,9 +16,16 @@ from pydantic import BaseModel
 from chatdba.cases.pgvector_retriever import PgVectorCaseRetriever
 from chatdba.cases.repository import load_optimization_cases
 from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_sql_from_message
+from chatdba.dingtalk.handler import (
+    extract_fault_diagnosis_text,
+    is_fault_diagnosis_message,
+)
 from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.runtime import SqlOnlyCollector
 from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.fault.runtime import build_fault_diagnosis_runtime
+from chatdba.tasks.fault_service import FaultDiagnosisTaskService
+from chatdba.tasks.repository import PostgresTaskRepository
 from chatdba.tasks.service import OptimizationTaskExecution, OptimizationTaskService
 from chatdba.workflow.report_builder import OptimizationReportComposer
 
@@ -95,15 +102,31 @@ class TaskServiceProvider:
 def _build_task_service() -> OptimizationTaskService:
     collector = SqlOnlyCollector()
     report_composer = OptimizationReportComposer(cases=[])
+    task_repository = None
     settings = _safe_load_settings()
 
     if settings is not None:
         collector = _build_configured_collector(settings)
         report_composer = _build_report_composer(settings)
+        task_repository = _build_task_repository(settings)
 
     return OptimizationTaskService(
         collector=collector,
         report_composer=report_composer,
+        task_repository=task_repository,
+    )
+
+
+def _build_fault_task_service() -> FaultDiagnosisTaskService:
+    settings = _safe_load_settings()
+    if settings is None:
+        return FaultDiagnosisTaskService()
+
+    fault_runtime = build_fault_diagnosis_runtime(settings)
+    return FaultDiagnosisTaskService(
+        top_sql_agent=fault_runtime.top_sql_agent,
+        metric_agent=fault_runtime.metric_agent,
+        qwen_gateway=_build_qwen_gateway(settings),
     )
 
 
@@ -119,29 +142,34 @@ def _safe_load_settings():
 
 def _build_report_composer(settings) -> OptimizationReportComposer:
     cases = _load_cases_from_settings(settings)
-    if not settings.qwen_api_key:
+    gateway = _build_qwen_gateway(settings)
+    if gateway is None:
         return OptimizationReportComposer(cases=cases)
+    return OptimizationReportComposer(
+        cases=cases,
+        qwen_gateway=gateway,
+        case_retriever=_build_case_retriever(settings, cases, gateway),
+    )
 
+
+def _build_qwen_gateway(settings):
+    if not settings.qwen_api_key:
+        return None
     try:
         from openai import OpenAI
 
         from chatdba.models.qwen_gateway import QwenGateway
     except Exception:
-        LOGGER.exception("Failed to import Qwen dependencies, use fallback report composer.")
-        return OptimizationReportComposer(cases=cases)
+        LOGGER.exception("Failed to import Qwen dependencies.")
+        return None
 
-    gateway = QwenGateway(
+    return QwenGateway(
         client=OpenAI(
             base_url=settings.qwen_base_url,
             api_key=settings.qwen_api_key,
         ),
         model=settings.qwen_model,
         embedding_model=getattr(settings, "qwen_embedding_model", None),
-    )
-    return OptimizationReportComposer(
-        cases=cases,
-        qwen_gateway=gateway,
-        case_retriever=_build_case_retriever(settings, cases, gateway),
     )
 
 
@@ -168,6 +196,13 @@ def _build_case_retriever(settings, cases, gateway):
         vector_top_k=int(getattr(settings, "case_retrieval_vector_top_k", 12)),
         candidate_limit=int(getattr(settings, "case_retrieval_candidate_limit", 12)),
     )
+
+
+def _build_task_repository(settings):
+    database_url = getattr(settings, "database_url", "")
+    if not database_url:
+        return None
+    return PostgresTaskRepository(database_url)
 
 
 def _build_configured_collector(settings):
@@ -354,6 +389,63 @@ def _stream_events_for_sql(
         yield _format_sse(event, payload)
 
 
+def _stream_events_for_fault(
+    input_text: str,
+    service_factory: Callable[[], FaultDiagnosisTaskService] = _build_fault_task_service,
+):
+    events: queue.Queue[tuple[str, dict[str, object]]] = queue.Queue()
+
+    def emit_progress(chunk: str) -> None:
+        text = chunk.strip()
+        if text:
+            events.put(("progress", {"text": text}))
+
+    def run_task() -> None:
+        try:
+            service = service_factory()
+            execution = service.run_diagnosis(
+                input_text=input_text,
+                dingtalk_context=DingTalkContext(
+                    message_id=f"stream-{uuid4()}",
+                    conversation_id="dingtalk-graph-stream",
+                    sender_id="dingtalk-graph",
+                    session_webhook=None,
+                ),
+                progress_sink=emit_progress,
+            )
+            if execution.status == TaskStatus.COMPLETED and execution.result is not None:
+                report_text = _render_report_text(execution.result.get("report"))
+                for chunk in _iter_markdown_chunks(report_text):
+                    events.put(("markdown", {"text": chunk}))
+            events.put(("final", _build_final_event(execution)))
+        except Exception as exc:
+            LOGGER.exception("Unhandled error while processing /v1/stream fault task.")
+            events.put(("error", {"message": str(exc) or exc.__class__.__name__}))
+        finally:
+            events.put(("done", {}))
+
+    worker = threading.Thread(target=run_task, daemon=True)
+    worker.start()
+
+    yield _format_sse("ready", {"status": "accepted"})
+    last_heartbeat = time.monotonic()
+
+    while True:
+        try:
+            event, payload = events.get(timeout=0.5)
+        except queue.Empty:
+            if time.monotonic() - last_heartbeat >= STREAM_HEARTBEAT_SECONDS:
+                yield _format_sse("heartbeat", {"ts": int(time.time())})
+                last_heartbeat = time.monotonic()
+            continue
+
+        if event == "done":
+            yield _format_sse("end", {"status": "completed"})
+            return
+
+        yield _format_sse(event, payload)
+
+
 def _build_final_event(execution: OptimizationTaskExecution) -> dict[str, object]:
     if execution.status == TaskStatus.COMPLETED:
         return {
@@ -370,6 +462,9 @@ def _build_final_event(execution: OptimizationTaskExecution) -> dict[str, object
 def _render_report_text(report: object) -> str:
     if report is None:
         return ""
+    markdown = getattr(report, "markdown", None)
+    if isinstance(markdown, str):
+        return markdown
     try:
         return render_report_for_dingtalk(report)  # type: ignore[arg-type]
     except Exception:
@@ -398,7 +493,9 @@ def _iter_markdown_chunks(markdown: str) -> list[str]:
 def create_app() -> FastAPI:
     app = FastAPI(title="ChatDBA", version="0.1.0")
     service_provider = TaskServiceProvider(_build_task_service)
+    fault_service_provider = TaskServiceProvider(_build_fault_task_service)
     app.state.task_service_provider = service_provider
+    app.state.fault_service_provider = fault_service_provider
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -421,9 +518,10 @@ def create_app() -> FastAPI:
     def create_sql_optimization_task(
         request: CreateOptimizationTaskRequest,
     ) -> CreateOptimizationTaskResponse:
-        _ = request
+        service = service_provider.get()
+        task_id = service.create_task_record(raw_sql=request.raw_sql)
         return CreateOptimizationTaskResponse(
-            task_id=str(uuid4()),
+            task_id=task_id,
             status=TaskStatus.RECEIVED,
         )
 
@@ -442,6 +540,24 @@ def create_app() -> FastAPI:
 
             if not isinstance(payload, dict):
                 payload = {"input": str(payload)}
+
+            raw_text = _extract_text_payload(payload).strip()
+            if is_fault_diagnosis_message(raw_text):
+                input_text = extract_fault_diagnosis_text(raw_text).strip()
+                if not input_text:
+                    return StreamingResponse(
+                        error_stream(
+                            "empty_fault_diagnosis",
+                            "未识别到故障诊断信息，请输入告警内容、系统名称或 IP。",
+                        ),
+                        media_type="text/event-stream",
+                        headers=STREAM_EVENT_HEADERS,
+                    )
+                return StreamingResponse(
+                    _stream_events_for_fault(input_text, fault_service_provider.get),
+                    media_type="text/event-stream",
+                    headers=STREAM_EVENT_HEADERS,
+                )
 
             raw_sql = _extract_sql_from_payload(payload)
             if not raw_sql:

@@ -8,6 +8,7 @@ import pytest
 from chatdba.dingtalk.runtime import (
     build_dingtalk_runtime,
 )
+from chatdba.dingtalk.channel import DingTalkInboundMessage
 from chatdba.dingtalk.sdk_runtime import DingTalkSdkBundle
 
 
@@ -274,3 +275,29 @@ def test_build_runtime_defaults_to_card_streaming_sender_when_sdk_supports_it():
     )
 
     assert runtime.sender.__class__.__name__ == "DingTalkCardStreamingSender"
+
+
+def test_build_runtime_routes_fault_diagnosis_messages_to_fault_agent():
+    sender = FakeSender()
+    runtime = build_dingtalk_runtime(
+        settings=make_settings(),
+        sender=sender,
+        sdk_bundle=make_sdk_bundle(),
+    )
+
+    result = runtime.app_handler.handle(
+        DingTalkInboundMessage(
+            message_id="msg-fault",
+            conversation_id="conv-1",
+            sender_id="user-1",
+            text="故障诊断 订单系统 CPU 高，IP 10.186.17.54",
+            session_webhook="https://example.test/webhook",
+        )
+    )
+
+    assert result.accepted is True
+    assert result.status.value == "completed"
+    full_text = "\n".join(item["text"] for item in sender.messages)
+    assert "数据库故障诊断任务已接收" in full_text
+    assert "### 一、问题简述" in full_text
+    assert "证据不足" in full_text

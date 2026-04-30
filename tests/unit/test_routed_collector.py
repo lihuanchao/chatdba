@@ -10,6 +10,9 @@ class FakeRouter:
     def resolve(self, tables):
         return self.envelope
 
+    def resolve_with_tables(self, tables):
+        return self.envelope, tables
+
 
 class FakeConnectionFactory:
     def __init__(self, client):
@@ -115,3 +118,24 @@ def test_routed_collector_preserves_sql_only_when_router_cannot_route():
     assert evidence.status == EvidenceStatus.SQL_ONLY
     assert evidence.route is None
     assert "未找到一个或多个表的路由信息" in evidence.collection_errors[0]
+
+
+def test_routed_collector_uses_router_resolved_tables_for_ddl_lookup():
+    class ResolvedTableRouter(FakeRouter):
+        def resolve_with_tables(self, tables):
+            return self.envelope, [
+                MysqlTableTarget(schema_name="shop", table_name="orders")
+            ]
+
+    collector = RoutedMysqlEvidenceCollector(
+        router=ResolvedTableRouter(make_full_route_envelope()),
+        connection_factory=FakeConnectionFactory(SuccessfulMysqlClient()),
+    )
+
+    evidence = collector.collect(
+        "select * from orders",
+        [MysqlTableTarget(schema_name=None, table_name="orders")],
+    )
+
+    assert evidence.status == EvidenceStatus.FULL
+    assert evidence.create_tables["shop.orders"].startswith("CREATE TABLE orders")

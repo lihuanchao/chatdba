@@ -3,7 +3,9 @@ from chatdba.db.metadata_router import (
     MetadataRouter,
     MysqlMetadataRouteRepository,
 )
+from chatdba.db.metadata_repository import StaticMetadataRepository
 from chatdba.db.mysql_collector import MysqlTableTarget
+from chatdba.domain.models import TableReference
 from chatdba.domain.models import EvidenceStatus
 
 
@@ -60,6 +62,23 @@ def test_metadata_route_repository_maps_rows_from_metadata_database():
     assert client.params == ["shop", "orders"]
 
 
+def test_metadata_route_repository_queries_unqualified_table_by_name_only():
+    client = FakeMetadataMysqlClient()
+    repository = MysqlMetadataRouteRepository(
+        client=client,
+        route_table="table_routes",
+        instance_table="db_instances",
+    )
+
+    repository.find_routes(
+        [MysqlTableTarget(schema_name=None, table_name="orders")]
+    )
+
+    assert "r.table_name = %s" in client.sql
+    assert "r.schema_name = %s" not in client.sql
+    assert client.params == ["orders"]
+
+
 def test_router_returns_single_instance_route():
     repository = FakeMetadataRouteRepository(
         [
@@ -88,6 +107,151 @@ def test_router_returns_single_instance_route():
     assert route.route.instance_id == "mysql-order-ro"
     assert route.route.credentials == {"username": "readonly", "password": "secret"}
     assert route.collection_errors == []
+
+
+def test_router_resolves_unqualified_single_table_by_table_name():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="shop",
+                table_name="orders",
+                instance_id="mysql-order-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="archive",
+                table_name="orders",
+                instance_id="mysql-order-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    route = router.resolve(
+        [MysqlTableTarget(schema_name=None, table_name="orders")]
+    )
+
+    assert route.status == EvidenceStatus.FULL
+    assert route.route.instance_id == "mysql-order-ro"
+    assert route.route.default_schema == "shop"
+
+
+def test_router_resolves_multiple_unqualified_tables_from_one_schema():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="shop",
+                table_name="orders",
+                instance_id="mysql-main-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="shop",
+                table_name="users",
+                instance_id="mysql-main-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="archive",
+                table_name="orders",
+                instance_id="mysql-main-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    route = router.resolve(
+        [
+            MysqlTableTarget(schema_name=None, table_name="orders"),
+            MysqlTableTarget(schema_name=None, table_name="users"),
+        ]
+    )
+
+    assert route.status == EvidenceStatus.FULL
+    assert route.route.instance_id == "mysql-main-ro"
+    assert route.route.default_schema == "shop"
+
+
+def test_router_degrades_when_unqualified_tables_have_no_common_schema():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="shop",
+                table_name="orders",
+                instance_id="mysql-main-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="crm",
+                table_name="users",
+                instance_id="mysql-main-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    route = router.resolve(
+        [
+            MysqlTableTarget(schema_name=None, table_name="orders"),
+            MysqlTableTarget(schema_name=None, table_name="users"),
+        ]
+    )
+
+    assert route.status == EvidenceStatus.SQL_ONLY
+    assert route.route is None
+    assert "未找到可同时匹配无库名前缀表的一致库路由信息" in route.collection_errors[0]
 
 
 def test_router_degrades_when_tables_span_multiple_instances():
@@ -147,3 +311,14 @@ def test_router_degrades_when_table_route_is_missing():
     assert route.status == EvidenceStatus.SQL_ONLY
     assert route.route is None
     assert "未找到一个或多个表的路由信息" in route.collection_errors[0]
+
+
+def test_static_metadata_repository_preserves_unqualified_tables():
+    repository = StaticMetadataRepository(default_schema="shop")
+
+    targets = repository.resolve_tables(
+        [TableReference(schema_name=None, table_name="orders")]
+    )
+
+    assert targets[0].schema_name is None
+    assert targets[0].table_name == "orders"

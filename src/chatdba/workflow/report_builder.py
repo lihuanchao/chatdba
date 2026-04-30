@@ -20,8 +20,15 @@ from chatdba.domain.report_schema import (
     IndexRecommendation,
     OptimizationReport,
     Risk,
-    SimilarCase,
     SqlRewrite,
+)
+from chatdba.workflow.case_match_reason import similar_cases_for_report
+from chatdba.workflow.problem_profile import (
+    SqlProblemProfile,
+    build_case_retrieval_query,
+    build_problem_profile_with_qwen,
+    derive_problem_profile,
+    merge_problem_profiles,
 )
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -61,6 +68,11 @@ class OptimizationReportComposer:
         self._cases = cases
         self._qwen_gateway = qwen_gateway
         self._case_retriever = case_retriever
+        self._last_case_retrieval_debug: dict[str, object] | None = None
+
+    @property
+    def last_case_retrieval_debug(self) -> dict[str, object] | None:
+        return self._last_case_retrieval_debug
 
     def compose(
         self,
@@ -71,6 +83,7 @@ class OptimizationReportComposer:
         evidence: EvidenceEnvelope,
         findings: list[RuleFinding],
     ) -> OptimizationReport:
+        self._last_case_retrieval_debug = None
         if self._qwen_gateway is not None:
             report = self._compose_with_qwen(
                 task_id=task_id,
@@ -100,11 +113,21 @@ class OptimizationReportComposer:
         findings: list[RuleFinding],
     ) -> OptimizationReport | None:
         system_prompt = _load_system_prompt()
-        similar_cases = self._select_cases(
+        problem_profile = self._build_problem_profile(
+            raw_sql=raw_sql,
             sql_features=sql_features,
             evidence=evidence,
             findings=findings,
+            use_qwen=True,
         )
+        case_query = build_case_retrieval_query(
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+            problem_profile=problem_profile,
+        )
+        similar_cases = self._select_cases_for_query(case_query)
+        self._record_case_retrieval_debug(case_query, similar_cases)
         user_prompt = json.dumps(
             {
                 "task_id": task_id,
@@ -112,6 +135,7 @@ class OptimizationReportComposer:
                 "sql_features": sql_features.model_dump(mode="python"),
                 "evidence": evidence.model_dump(mode="python"),
                 "findings": [finding.model_dump(mode="python") for finding in findings],
+                "problem_profile": problem_profile.model_dump(mode="python"),
                 "similar_cases": [case.model_dump(mode="python") for case in similar_cases],
             },
             ensure_ascii=False,
@@ -120,7 +144,10 @@ class OptimizationReportComposer:
             payload = self._qwen_gateway.generate_report(system_prompt, user_prompt)
             report = OptimizationReport.model_validate(json.loads(payload))
             if not report.similar_cases and similar_cases:
-                report.similar_cases = _similar_cases_for_report(similar_cases)
+                report.similar_cases = similar_cases_for_report(
+                    similar_cases,
+                    case_query,
+                )
             return report
         except Exception:
             return None
@@ -137,13 +164,22 @@ class OptimizationReportComposer:
         confidence, confidence_label = self._confidence_for(evidence.status)
         limitations = self._limitations_for(evidence)
         summary = self._build_summary(findings, evidence.status)
-        similar_cases = _similar_cases_for_report(
-            self._select_cases(
-                sql_features=sql_features,
-                evidence=evidence,
-                findings=findings,
-            )
+        problem_profile = self._build_problem_profile(
+            raw_sql=raw_sql,
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+            use_qwen=False,
         )
+        case_query = build_case_retrieval_query(
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+            problem_profile=problem_profile,
+        )
+        selected_cases = self._select_cases_for_query(case_query)
+        self._record_case_retrieval_debug(case_query, selected_cases)
+        similar_cases = similar_cases_for_report(selected_cases, case_query)
         sql_rewrites = self._build_sql_rewrites(raw_sql, findings)
         index_recommendations = self._build_index_recommendations(sql_features, findings)
         risks = self._build_risks(evidence.status)
@@ -174,12 +210,20 @@ class OptimizationReportComposer:
         sql_features: SqlFeatures,
         evidence: EvidenceEnvelope,
         findings: list[RuleFinding],
+        problem_profile: SqlProblemProfile | None = None,
     ) -> list[OptimizationCase]:
-        query = _build_case_retrieval_query(
+        query = build_case_retrieval_query(
             sql_features=sql_features,
             evidence=evidence,
             findings=findings,
+            problem_profile=problem_profile,
         )
+        return self._select_cases_for_query(query)
+
+    def _select_cases_for_query(
+        self,
+        query: CaseRetrievalQuery,
+    ) -> list[OptimizationCase]:
         if self._case_retriever is not None:
             return self._case_retriever.retrieve(query, limit=3)
         return retrieve_cases_for_query(
@@ -187,6 +231,59 @@ class OptimizationReportComposer:
             query,
             limit=3,
         )
+
+    def _build_problem_profile(
+        self,
+        *,
+        raw_sql: str,
+        sql_features: SqlFeatures,
+        evidence: EvidenceEnvelope,
+        findings: list[RuleFinding],
+        use_qwen: bool,
+    ) -> SqlProblemProfile:
+        base_profile = derive_problem_profile(
+            raw_sql=raw_sql,
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+        )
+        if not use_qwen or self._qwen_gateway is None:
+            return base_profile
+
+        qwen_profile = build_problem_profile_with_qwen(
+            qwen_gateway=self._qwen_gateway,
+            raw_sql=raw_sql,
+            sql_features=sql_features,
+            evidence=evidence,
+            findings=findings,
+        )
+        if qwen_profile is None:
+            return base_profile
+        return merge_problem_profiles(base_profile, qwen_profile)
+
+    def _record_case_retrieval_debug(
+        self,
+        query: CaseRetrievalQuery,
+        cases: list[OptimizationCase],
+    ) -> None:
+        similar_cases = similar_cases_for_report(cases, query)
+        self._last_case_retrieval_debug = {
+            "query": {
+                "db_type": query.db_type,
+                "db_version_major": query.db_version_major,
+                "sql_type": query.sql_type,
+                "scenario_tags": query.scenario_tags,
+                "plan_symptom_tags": query.plan_symptom_tags,
+                "root_cause_tags": query.root_cause_tags,
+            },
+            "matched_cases": [
+                {
+                    "case_id": case.case_id,
+                    "reason": case.reason,
+                }
+                for case in similar_cases
+            ],
+        }
 
     def _confidence_for(
         self,
@@ -305,188 +402,6 @@ class OptimizationReportComposer:
         return [
             "先在目标库测试环境执行 EXPLAIN 与回归测试，再决定是否上线。",
         ]
-
-
-def _db_type_for(evidence: EvidenceEnvelope) -> str:
-    if evidence.route and evidence.route.db_type:
-        return evidence.route.db_type
-    return "mysql"
-
-
-def _db_version_major_for(evidence: EvidenceEnvelope) -> str | None:
-    if evidence.route is None or not evidence.route.version:
-        return None
-    version = evidence.route.version.strip()
-    match = re.match(r"^(\d+)(?:\.(\d+))?", version)
-    if not match:
-        return version
-    if match.group(2):
-        return f"{match.group(1)}.{match.group(2)}"
-    return match.group(1)
-
-
-def _scenario_tags_for(sql_features: SqlFeatures) -> list[str]:
-    tags: list[str] = []
-    if sql_features.joins:
-        tags.append("join")
-    if sql_features.group_by:
-        tags.append("group_by")
-    if sql_features.order_by:
-        tags.append("order_by")
-    if sql_features.has_limit:
-        tags.append("limit")
-    return tags
-
-
-def _plan_symptom_tags_for(
-    evidence: EvidenceEnvelope,
-    findings: list[RuleFinding],
-) -> list[str]:
-    tags: set[str] = set()
-    for finding in findings:
-        tags.update(_plan_symptoms_from_finding(finding.code))
-    if evidence.explain_json:
-        tags.update(_collect_plan_terms(evidence.explain_json))
-    return sorted(tags)
-
-
-def _root_cause_tags_for(findings: list[RuleFinding]) -> list[str]:
-    tags: set[str] = set()
-    for finding in findings:
-        tags.update(_root_causes_from_finding(finding.code))
-    return sorted(tags)
-
-
-def _build_case_retrieval_query(
-    *,
-    sql_features: SqlFeatures,
-    evidence: EvidenceEnvelope,
-    findings: list[RuleFinding],
-) -> CaseRetrievalQuery:
-    db_type = _db_type_for(evidence)
-    db_version_major = _db_version_major_for(evidence)
-    sql_type = sql_features.statement_type
-    scenario_tags = _scenario_tags_for(sql_features)
-    plan_symptom_tags = _plan_symptom_tags_for(evidence, findings)
-    root_cause_tags = _root_cause_tags_for(findings)
-    return CaseRetrievalQuery(
-        db_type=db_type,
-        db_version_major=db_version_major,
-        sql_type=sql_type,
-        scenario_tags=scenario_tags,
-        plan_symptom_tags=plan_symptom_tags,
-        root_cause_tags=root_cause_tags,
-        embedding_text=_case_query_embedding_text(
-            db_type=db_type,
-            db_version_major=db_version_major,
-            sql_type=sql_type,
-            scenario_tags=scenario_tags,
-            plan_symptom_tags=plan_symptom_tags,
-            root_cause_tags=root_cause_tags,
-            sql_features=sql_features,
-        ),
-    )
-
-
-def _case_query_embedding_text(
-    *,
-    db_type: str,
-    db_version_major: str | None,
-    sql_type: str | None,
-    scenario_tags: list[str],
-    plan_symptom_tags: list[str],
-    root_cause_tags: list[str],
-    sql_features: SqlFeatures,
-) -> str:
-    parts = [
-        db_type,
-        db_version_major or "",
-        sql_type or "",
-        " ".join(scenario_tags),
-        " ".join(plan_symptom_tags),
-        " ".join(root_cause_tags),
-        f"tables={len(sql_features.tables or [])}",
-        "predicates=" + " | ".join(sql_features.predicates or []),
-        "joins=" + " | ".join(sql_features.joins or []),
-        "order_by=" + " | ".join(sql_features.order_by or []),
-    ]
-    return " ".join(part for part in parts if part).strip()
-
-
-def _plan_symptoms_from_finding(code: str) -> set[str]:
-    normalized = _normalize_tag(code)
-    mapping = {
-        "limit_with_order_by": {"using_filesort"},
-        "full_table_scan": {"all"},
-        "temporary_table": {"using_temporary"},
-    }
-    return mapping.get(normalized, {normalized} if normalized else set())
-
-
-def _root_causes_from_finding(code: str) -> set[str]:
-    normalized = _normalize_tag(code)
-    mapping = {
-        "limit_with_order_by": {"missing_composite_index"},
-        "full_table_scan": {"missing_index"},
-        "implicit_cast": {"implicit_cast"},
-        "wrong_driving_table": {"wrong_driving_table"},
-    }
-    return mapping.get(normalized, {normalized} if normalized else set())
-
-
-def _collect_plan_terms(value: object) -> set[str]:
-    terms: set[str] = set()
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            normalized_key = _normalize_tag(str(key))
-            if normalized_key in {
-                "using_filesort",
-                "using_temporary",
-                "using_temporary_table",
-                "using_join_buffer",
-            } and nested:
-                if normalized_key == "using_temporary_table":
-                    terms.add("using_temporary")
-                else:
-                    terms.add(normalized_key)
-            if normalized_key in {"access_type", "join_type", "node_type"} and isinstance(
-                nested,
-                str,
-            ):
-                terms.add(_normalize_tag(nested))
-            terms.update(_collect_plan_terms(nested))
-    elif isinstance(value, list):
-        for item in value:
-            terms.update(_collect_plan_terms(item))
-    elif isinstance(value, str):
-        normalized = _normalize_tag(value)
-        if normalized in {
-            "all",
-            "range",
-            "ref",
-            "index_merge",
-            "using_filesort",
-            "using_temporary",
-            "seq_scan",
-            "nested_loop",
-            "hash_join",
-            "bitmap_heap_scan",
-            "sort",
-            "materialize",
-        }:
-            terms.add(normalized)
-    return terms
-
-
-def _normalize_tag(value: str) -> str:
-    return value.strip().lower().replace(" ", "_")
-
-
-def _similar_cases_for_report(cases: list[OptimizationCase]) -> list[SimilarCase]:
-    return [
-        SimilarCase(case_id=case.case_id, reason=case.case_card)
-        for case in cases
-    ]
 
 
 def _recommended_index_columns(sql_features: SqlFeatures) -> list[str]:

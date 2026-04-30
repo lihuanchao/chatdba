@@ -150,6 +150,53 @@ def test_v1_stream_reuses_task_service_between_requests(monkeypatch):
     assert calls == 1
 
 
+def test_v1_stream_routes_fault_diagnosis_prefix_to_fault_service(monkeypatch):
+    seen = {}
+
+    class FakeFaultService:
+        def run_diagnosis(self, *, input_text, dingtalk_context, progress_sink=None):
+            seen["input_text"] = input_text
+            seen["dingtalk_context"] = dingtalk_context
+            if progress_sink is not None:
+                progress_sink("正在获取 TopSQL...\n")
+            report = type(
+                "Report",
+                (),
+                {
+                    "markdown": (
+                        "### 一、问题简述\n"
+                        "订单系统 CPU 高\n\n"
+                        "### 四、问题分析及优化建议\n"
+                        "优化 TopSQL"
+                    )
+                },
+            )()
+            return OptimizationTaskExecution(
+                task_id="fault-stream-1",
+                status=TaskStatus.COMPLETED,
+                result={"report": report},
+            )
+
+    monkeypatch.setattr(
+        "chatdba.app.main._build_fault_task_service",
+        lambda: FakeFaultService(),
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/stream",
+        json={"input": "故障诊断 订单系统 CPU 高，IP 10.186.17.54"},
+    )
+
+    assert response.status_code == 200
+    assert seen["input_text"] == "订单系统 CPU 高，IP 10.186.17.54"
+    assert seen["dingtalk_context"].conversation_id == "dingtalk-graph-stream"
+    assert "event: progress" in response.text
+    assert "正在获取 TopSQL" in response.text
+    assert "event: markdown" in response.text
+    assert "### 一、问题简述" in response.text
+
+
 def test_v1_stream_runtime_loads_cases_from_case_library(monkeypatch):
     monkeypatch.setattr(
         "chatdba.app.main._safe_load_settings",

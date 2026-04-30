@@ -1,13 +1,14 @@
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from chatdba.cases.repository import OptimizationCase
 from chatdba.cases.retriever import (
     CaseRetrievalQuery,
     RetrievalScoreOverride,
+    hard_filter_scenario_tags,
     retrieve_cases_for_query,
 )
 
@@ -91,11 +92,16 @@ class PgVectorCaseRetriever:
             LOGGER.warning("Case embedding generation failed, fallback to rule-only retrieval.", exc_info=True)
             return []
 
+        vector_query = replace(
+            query,
+            scenario_tags=hard_filter_scenario_tags(query.scenario_tags),
+        )
+
         try:
             if self._vector_search is not None:
                 return list(
                     self._vector_search(
-                        query=query,
+                        query=vector_query,
                         embedding=embedding,
                         top_k=self._vector_top_k,
                     )
@@ -103,7 +109,7 @@ class PgVectorCaseRetriever:
             return asyncio.run(
                 _search_vector_hits_async(
                     database_url=self._database_url,
-                    query=query,
+                    query=vector_query,
                     embedding=embedding,
                     top_k=self._vector_top_k,
                 )

@@ -2,6 +2,27 @@ from dataclasses import dataclass, field
 
 from chatdba.cases.repository import OptimizationCase
 
+SOFT_SCENARIO_TAGS = {
+    "aggregate",
+    "any_all_subquery",
+    "delete_all",
+    "derived_table",
+    "distinct",
+    "exists_subquery",
+    "function_predicate",
+    "having",
+    "in_subquery",
+    "left_join",
+    "max_min_subquery",
+    "not_in_subquery",
+    "null_check",
+    "or_predicate",
+    "projection",
+    "where_filter",
+    "equality_predicate",
+    "range_predicate",
+}
+
 
 @dataclass(frozen=True)
 class CaseRetrievalQuery:
@@ -96,6 +117,15 @@ def retrieve_cases_for_query(
     )
 
 
+def hard_filter_scenario_tags(values: list[str]) -> list[str]:
+    tags: list[str] = []
+    for value in values:
+        tag = _normalize_scalar(value)
+        if tag and tag not in SOFT_SCENARIO_TAGS and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
 class _RetrievalProfile:
     def __init__(
         self,
@@ -136,7 +166,12 @@ def _passes_hard_filters(profile: _RetrievalProfile, case: OptimizationCase) -> 
         return False
 
     case_scenario_tags = _normalize_set(case.scenario_tags)
-    if profile.scenario_tags and case_scenario_tags and not profile.scenario_tags.intersection(case_scenario_tags):
+    hard_scenario_tags = set(hard_filter_scenario_tags(list(profile.scenario_tags)))
+    if (
+        hard_scenario_tags
+        and case_scenario_tags
+        and not hard_scenario_tags.intersection(case_scenario_tags)
+    ):
         return False
 
     return True

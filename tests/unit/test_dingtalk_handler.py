@@ -1,11 +1,20 @@
 from chatdba.dingtalk.channel import DingTalkInboundMessage
 from chatdba.dingtalk.handler import (
+    FAULT_DIAGNOSIS_STARTED_MESSAGE,
     SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX,
     SQL_OPTIMIZATION_STARTED_MESSAGE,
     SQL_OPTIMIZATION_USAGE_MESSAGE,
+    DingTalkChatDBAHandler,
+    DingTalkFaultDiagnosisHandler,
     DingTalkSqlOptimizationHandler,
 )
 from chatdba.dingtalk.responder import DingTalkSendResult
+from chatdba.domain.fault_diagnosis import (
+    FaultDiagnosisProfile,
+    FaultDiagnosisReport,
+    MetricEvidence,
+    TopSqlEvidence,
+)
 from chatdba.domain.models import ConfidenceLabel, EvidenceStatus, TaskStatus
 from chatdba.domain.report_schema import OptimizationReport
 from chatdba.tasks.service import OptimizationTaskExecution
@@ -88,6 +97,46 @@ class FailedTaskService:
         )
 
 
+class SuccessfulFaultTaskService:
+    def __init__(self):
+        self.calls = []
+
+    def run_diagnosis(self, *, input_text, dingtalk_context, progress_sink=None):
+        self.calls.append(
+            {
+                "input_text": input_text,
+                "dingtalk_context": dingtalk_context,
+                "progress_sink": progress_sink,
+            }
+        )
+        if progress_sink:
+            progress_sink("正在获取 TopSQL...\n")
+        profile = FaultDiagnosisProfile(
+            input_text=input_text,
+            system_name="订单系统",
+            primary_ip="10.186.17.54",
+            start_time="2026-04-30 14:00:00",
+            end_time="2026-04-30 15:00:00",
+            query_background="订单系统故障诊断",
+        )
+        return OptimizationTaskExecution(
+            task_id="fault-1",
+            status=TaskStatus.COMPLETED,
+            result={
+                "report": FaultDiagnosisReport(
+                    task_id="fault-1",
+                    summary="CPU 高",
+                    markdown="### 一、问题简述\n订单系统 CPU 高\n\n### 四、问题分析及优化建议\n建议优化 TopSQL",
+                    root_cause="TopSQL 导致 CPU 高",
+                    recommendations=["优化 TopSQL"],
+                    profile=profile,
+                    top_sql=TopSqlEvidence(status="failure"),
+                    metrics=MetricEvidence(status="failure"),
+                )
+            },
+        )
+
+
 def make_message(text: str) -> DingTalkInboundMessage:
     return DingTalkInboundMessage(
         message_id="msg-1",
@@ -156,3 +205,75 @@ def test_handler_sends_failure_message_when_task_fails():
     assert responder.messages[-1] == (
         f"{SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX}collector unavailable"
     )
+
+
+def test_fault_handler_runs_diagnosis_and_streams_markdown_report():
+    responder = RecordingResponder()
+    service = SuccessfulFaultTaskService()
+    handler = DingTalkFaultDiagnosisHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    result = handler.handle(make_message("故障诊断 订单系统 CPU 高，IP 10.186.17.54"))
+
+    assert result.accepted is True
+    assert result.task_id == "fault-1"
+    assert result.status == TaskStatus.COMPLETED
+    assert service.calls[0]["input_text"] == "订单系统 CPU 高，IP 10.186.17.54"
+    assert responder.messages[0] == FAULT_DIAGNOSIS_STARTED_MESSAGE
+    full_stream_text = "".join(responder.messages[1:])
+    assert "正在获取 TopSQL" in full_stream_text
+    assert "### 一、问题简述" in full_stream_text
+    assert "### 四、问题分析及优化建议" in full_stream_text
+
+
+def test_chatdba_handler_routes_fault_prefix_to_fault_handler():
+    responder = RecordingResponder()
+    sql_service = SuccessfulTaskService()
+    fault_service = SuccessfulFaultTaskService()
+    handler = DingTalkChatDBAHandler(
+        sql_handler=DingTalkSqlOptimizationHandler(
+            task_service=sql_service,
+            responder=responder,
+            stream_interval_ms=1000,
+        ),
+        fault_handler=DingTalkFaultDiagnosisHandler(
+            task_service=fault_service,
+            responder=responder,
+            stream_interval_ms=1000,
+        ),
+    )
+
+    result = handler.handle(make_message("故障分析 订单系统 CPU 高，IP 10.186.17.54"))
+
+    assert result.accepted is True
+    assert result.task_id == "fault-1"
+    assert sql_service.calls == []
+    assert fault_service.calls[0]["input_text"] == "订单系统 CPU 高，IP 10.186.17.54"
+
+
+def test_chatdba_handler_keeps_sql_prefix_on_sql_optimization_handler():
+    responder = RecordingResponder()
+    sql_service = SuccessfulTaskService()
+    fault_service = SuccessfulFaultTaskService()
+    handler = DingTalkChatDBAHandler(
+        sql_handler=DingTalkSqlOptimizationHandler(
+            task_service=sql_service,
+            responder=responder,
+            stream_interval_ms=1000,
+        ),
+        fault_handler=DingTalkFaultDiagnosisHandler(
+            task_service=fault_service,
+            responder=responder,
+            stream_interval_ms=1000,
+        ),
+    )
+
+    result = handler.handle(make_message("SQL优化 select * from orders"))
+
+    assert result.accepted is True
+    assert result.task_id == "task-1"
+    assert sql_service.calls[0]["raw_sql"] == "select * from orders"
+    assert fault_service.calls == []
