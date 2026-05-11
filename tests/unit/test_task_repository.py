@@ -1,4 +1,4 @@
-from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.domain.models import AgentTokenUsage, DingTalkContext, TaskStatus
 from chatdba.tasks.events import ProgressEvent
 from chatdba.tasks.repository import PostgresTaskRepository
 
@@ -97,3 +97,38 @@ def test_postgres_task_repository_reads_task_and_event_rows():
     assert task["status"] == TaskStatus.COMPLETED
     assert task["events"][0].status == TaskStatus.RECEIVED
     assert task["events"][0].message == "任务已接收"
+
+
+def test_postgres_task_repository_writes_agent_token_usage_rows():
+    connections = []
+
+    async def fake_connect(database_url: str):
+        connection = FakeAsyncConnection()
+        connections.append((database_url, connection))
+        return connection
+
+    repository = PostgresTaskRepository(
+        "postgresql+asyncpg://chatdba:chatdba@localhost:5432/chatdba",
+        connect_fn=fake_connect,
+    )
+
+    repository.append_token_usage(
+        AgentTokenUsage(
+            task_id="task-usage-1",
+            provider="qwen",
+            model="qwen-plus",
+            operation="generate_report",
+            prompt_tokens=120,
+            completion_tokens=64,
+            total_tokens=184,
+            raw_usage={
+                "prompt_tokens": 120,
+                "completion_tokens": 64,
+                "total_tokens": 184,
+            },
+        )
+    )
+
+    assert "INSERT INTO agent_token_usage" in connections[0][1].execute_calls[0][0]
+    assert connections[0][1].execute_calls[0][1][0] == "task-usage-1"
+    assert connections[0][1].closed is True

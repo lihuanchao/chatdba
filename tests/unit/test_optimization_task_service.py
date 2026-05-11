@@ -78,6 +78,7 @@ class RecordingTaskRepository:
     def __init__(self):
         self.created_tasks = []
         self.events = []
+        self.token_usages = []
 
     def create_task(self, task_id: str, raw_sql: str, dingtalk_context=None) -> None:
         self.created_tasks.append(
@@ -90,6 +91,9 @@ class RecordingTaskRepository:
 
     def append_event(self, event) -> None:
         self.events.append(event)
+
+    def append_token_usage(self, usage) -> None:
+        self.token_usages.append(usage)
 
 
 def test_task_service_persists_task_and_progress_events():
@@ -197,3 +201,52 @@ def test_task_service_persists_failed_event_when_runner_errors():
         TaskStatus.RECEIVED,
         TaskStatus.FAILED,
     ]
+
+
+def test_task_service_persists_agent_token_usage_records():
+    class FakeUsageGateway:
+        def __init__(self):
+            self.started_tasks = []
+
+        def start_usage_collection(self, *, task_id: str) -> None:
+            self.started_tasks.append(task_id)
+
+        def finish_usage_collection(self):
+            from chatdba.domain.models import AgentTokenUsage
+
+            return [
+                AgentTokenUsage(
+                    task_id="task-usage",
+                    provider="qwen",
+                    model="qwen-plus",
+                    operation="generate_report",
+                    prompt_tokens=100,
+                    completion_tokens=50,
+                    total_tokens=150,
+                    raw_usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+                )
+            ]
+
+    def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
+        return {"report": {"summary": "ok"}}
+
+    repository = RecordingTaskRepository()
+    gateway = FakeUsageGateway()
+    service = OptimizationTaskService(
+        collector=object(),
+        task_runner=fake_runner,
+        task_repository=repository,
+        qwen_gateway=gateway,
+        task_id_factory=lambda: "task-usage",
+    )
+
+    execution = service.run_sql(
+        raw_sql="select * from orders",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.COMPLETED
+    assert gateway.started_tasks == ["task-usage"]
+    assert len(repository.token_usages) == 1
+    assert repository.token_usages[0].task_id == "task-usage"
+    assert repository.token_usages[0].total_tokens == 150

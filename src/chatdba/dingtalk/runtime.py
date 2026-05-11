@@ -169,6 +169,7 @@ def build_dingtalk_runtime(
         collector=runtime_collector,
         report_composer=report_composer,
         task_repository=_build_task_repository(settings),
+        qwen_gateway=qwen_gateway,
     )
     fault_runtime = build_fault_diagnosis_runtime(settings)
     fault_task_service = FaultDiagnosisTaskService(

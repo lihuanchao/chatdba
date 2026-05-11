@@ -3,7 +3,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.domain.models import AgentTokenUsage, DingTalkContext, TaskStatus
 from chatdba.tasks.events import ProgressEvent
 
 
@@ -17,6 +17,9 @@ class TaskRepository(Protocol):
         raise NotImplementedError
 
     def append_event(self, event: ProgressEvent) -> None:
+        raise NotImplementedError
+
+    def append_token_usage(self, usage: AgentTokenUsage) -> None:
         raise NotImplementedError
 
     def get_task(self, task_id: str) -> dict[str, object]:
@@ -42,12 +45,19 @@ class InMemoryTaskRepository:
                 dingtalk_context.conversation_id if dingtalk_context else None
             ),
             "events": [],
+            "token_usages": [],
         }
 
     def append_event(self, event: ProgressEvent) -> None:
         task = self._tasks[event.task_id]
         task["status"] = event.status
         task["events"].append(event)
+
+    def append_token_usage(self, usage: AgentTokenUsage) -> None:
+        task = self._tasks[usage.task_id]
+        token_usages = task.setdefault("token_usages", [])
+        if isinstance(token_usages, list):
+            token_usages.append(usage)
 
     def get_task(self, task_id: str) -> dict[str, object]:
         return self._tasks[task_id]
@@ -79,6 +89,9 @@ class PostgresTaskRepository:
 
     def append_event(self, event: ProgressEvent) -> None:
         asyncio.run(self._append_event_async(event))
+
+    def append_token_usage(self, usage: AgentTokenUsage) -> None:
+        asyncio.run(self._append_token_usage_async(usage))
 
     def get_task(self, task_id: str) -> dict[str, object]:
         return asyncio.run(self._get_task_async(task_id))
@@ -150,6 +163,35 @@ class PostgresTaskRepository:
                 """,
                 event.task_id,
                 event.status.value,
+            )
+        finally:
+            await connection.close()
+
+    async def _append_token_usage_async(self, usage: AgentTokenUsage) -> None:
+        connection = await self._connect()
+        try:
+            await connection.execute(
+                """
+                INSERT INTO agent_token_usage (
+                    task_id,
+                    provider,
+                    model,
+                    operation,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    raw_usage,
+                    created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, now())
+                """,
+                usage.task_id,
+                usage.provider,
+                usage.model,
+                usage.operation,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                usage.total_tokens,
+                json.dumps(usage.raw_usage, ensure_ascii=False),
             )
         finally:
             await connection.close()

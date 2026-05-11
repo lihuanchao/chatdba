@@ -23,7 +23,14 @@ docker compose up -d
 pip install -e ".[dev]"
 ```
 
-3. Run tests:
+3. Initialize database schema:
+
+```bash
+psql "$DATABASE_URL" -f migrations/001_initial.sql
+psql "$DATABASE_URL" -f migrations/002_agent_token_usage.sql
+```
+
+4. Run tests:
 
 ```bash
 ./scripts/run-local-checks.sh
@@ -36,19 +43,19 @@ script at that interpreter:
 PYTHON_BIN=/path/to/venv/bin/python ./scripts/run-local-checks.sh
 ```
 
-4. Start API:
+5. Start API:
 
 ```bash
 uvicorn chatdba.app.main:app --reload
 ```
 
-5. Optional: backfill case embeddings for pgvector retrieval:
+6. Optional: backfill case embeddings for pgvector retrieval:
 
 ```bash
 python scripts/backfill_case_embeddings.py --limit 100
 ```
 
-6. Optional: import sample optimization cases for retrieval validation:
+7. Optional: import sample optimization cases for retrieval validation:
 
 ```bash
 psql "$DATABASE_URL" -f examples/seed_optimization_cases.sql

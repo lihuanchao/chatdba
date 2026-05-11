@@ -103,17 +103,20 @@ def _build_task_service() -> OptimizationTaskService:
     collector = SqlOnlyCollector()
     report_composer = OptimizationReportComposer(cases=[])
     task_repository = None
+    qwen_gateway = None
     settings = _safe_load_settings()
 
     if settings is not None:
         collector = _build_configured_collector(settings)
-        report_composer = _build_report_composer(settings)
+        qwen_gateway = _build_qwen_gateway(settings)
+        report_composer = _build_report_composer(settings, qwen_gateway=qwen_gateway)
         task_repository = _build_task_repository(settings)
 
     return OptimizationTaskService(
         collector=collector,
         report_composer=report_composer,
         task_repository=task_repository,
+        qwen_gateway=qwen_gateway,
     )
 
 
@@ -140,9 +143,13 @@ def _safe_load_settings():
         return None
 
 
-def _build_report_composer(settings) -> OptimizationReportComposer:
+def _build_report_composer(
+    settings,
+    *,
+    qwen_gateway=None,
+) -> OptimizationReportComposer:
     cases = _load_cases_from_settings(settings)
-    gateway = _build_qwen_gateway(settings)
+    gateway = qwen_gateway if qwen_gateway is not None else _build_qwen_gateway(settings)
     if gateway is None:
         return OptimizationReportComposer(cases=cases)
     return OptimizationReportComposer(

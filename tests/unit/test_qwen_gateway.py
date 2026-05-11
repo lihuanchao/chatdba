@@ -22,10 +22,34 @@ class FakeNonStreamChoice:
         self.message = type("Message", (), {"content": content})()
 
 
+class FakeUsage:
+    def __init__(
+        self,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+
+
 class FakeNonStreamCompletions:
     def create(self, **kwargs):
         assert kwargs["stream"] is False
-        return type("Response", (), {"choices": [FakeNonStreamChoice("{\"ok\": true}")]} )()
+        return type(
+            "Response",
+            (),
+            {
+                "choices": [FakeNonStreamChoice("{\"ok\": true}")],
+                "usage": FakeUsage(
+                    prompt_tokens=24,
+                    completion_tokens=12,
+                    total_tokens=36,
+                ),
+            },
+        )()
 
 
 class FakeClient:
@@ -43,7 +67,10 @@ class FakeEmbeddings:
         return type(
             "EmbeddingResponse",
             (),
-            {"data": [type("EmbeddingItem", (), {"embedding": [0.12, 0.34, 0.56]})()]},
+            {
+                "data": [type("EmbeddingItem", (), {"embedding": [0.12, 0.34, 0.56]})()],
+                "usage": FakeUsage(prompt_tokens=8, completion_tokens=0, total_tokens=8),
+            },
         )()
 
 
@@ -71,3 +98,39 @@ def test_gateway_generates_embeddings():
     )
 
     assert gateway.embed_text("mysql order by limit") == [0.12, 0.34, 0.56]
+
+
+def test_gateway_collects_generate_report_usage_records():
+    gateway = QwenGateway(client=FakeNonStreamClient(), model="qwen-plus")
+
+    gateway.start_usage_collection(task_id="task-1")
+    gateway.generate_report("system", "user")
+    records = gateway.finish_usage_collection()
+
+    assert len(records) == 1
+    assert records[0].task_id == "task-1"
+    assert records[0].operation == "generate_report"
+    assert records[0].model == "qwen-plus"
+    assert records[0].prompt_tokens == 24
+    assert records[0].completion_tokens == 12
+    assert records[0].total_tokens == 36
+
+
+def test_gateway_collects_embedding_usage_records():
+    gateway = QwenGateway(
+        client=FakeEmbeddingClient(),
+        model="qwen-plus",
+        embedding_model="text-embedding-v4",
+    )
+
+    gateway.start_usage_collection(task_id="task-2")
+    gateway.embed_text("mysql order by limit")
+    records = gateway.finish_usage_collection()
+
+    assert len(records) == 1
+    assert records[0].task_id == "task-2"
+    assert records[0].operation == "embed_text"
+    assert records[0].model == "text-embedding-v4"
+    assert records[0].prompt_tokens == 8
+    assert records[0].completion_tokens == 0
+    assert records[0].total_tokens == 8

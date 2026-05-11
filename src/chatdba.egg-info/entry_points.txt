@@ -1,0 +1,2 @@
+[console_scripts]
+chatdba-dingtalk = chatdba.dingtalk.runner:main

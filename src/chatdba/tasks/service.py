@@ -4,7 +4,12 @@ import logging
 from typing import Protocol
 from uuid import uuid4
 
-from chatdba.domain.models import DingTalkContext, SqlOptimizationRequest, TaskStatus
+from chatdba.domain.models import (
+    AgentTokenUsage,
+    DingTalkContext,
+    SqlOptimizationRequest,
+    TaskStatus,
+)
 from chatdba.tasks.events import ProgressEvent
 from chatdba.tasks.repository import TaskRepository
 from chatdba.workflow.report_builder import OptimizationReportComposer
@@ -24,6 +29,14 @@ class OptimizationTaskRunner(Protocol):
         pass
 
 
+class UsageTrackableGateway(Protocol):
+    def start_usage_collection(self, *, task_id: str) -> None:
+        raise NotImplementedError
+
+    def finish_usage_collection(self) -> list[AgentTokenUsage]:
+        raise NotImplementedError
+
+
 @dataclass(frozen=True)
 class OptimizationTaskExecution:
     task_id: str
@@ -41,12 +54,14 @@ class OptimizationTaskService:
         task_runner: OptimizationTaskRunner = run_sql_optimization_task,
         task_id_factory: Callable[[], str] | None = None,
         task_repository: TaskRepository | None = None,
+        qwen_gateway: UsageTrackableGateway | None = None,
     ) -> None:
         self._collector = collector
         self._report_composer = report_composer
         self._task_runner = task_runner
         self._task_id_factory = task_id_factory or (lambda: str(uuid4()))
         self._task_repository = task_repository
+        self._qwen_gateway = qwen_gateway
 
     def create_task_record(
         self,
@@ -78,6 +93,7 @@ class OptimizationTaskService:
             task_id=request.task_id,
             downstream=progress_sink,
         )
+        self._start_usage_collection(task_id=request.task_id)
 
         try:
             result = self._task_runner(
@@ -101,6 +117,8 @@ class OptimizationTaskService:
                 status=TaskStatus.FAILED,
                 error=error,
             )
+        finally:
+            self._record_collected_token_usage()
 
         self._record_case_retrieval_debug_event(request.task_id)
         self._record_event(
@@ -194,6 +212,43 @@ class OptimizationTaskService:
                 payload={"case_retrieval": debug},
             )
         )
+
+    def _start_usage_collection(self, *, task_id: str) -> None:
+        gateway = self._qwen_gateway
+        if gateway is None:
+            return
+        start = getattr(gateway, "start_usage_collection", None)
+        if not callable(start):
+            return
+        try:
+            start(task_id=task_id)
+        except Exception:
+            LOGGER.warning("Failed to start usage collection.", exc_info=True)
+
+    def _record_collected_token_usage(self) -> None:
+        gateway = self._qwen_gateway
+        repository = self._task_repository
+        if gateway is None or repository is None:
+            return
+        finish = getattr(gateway, "finish_usage_collection", None)
+        if not callable(finish):
+            return
+        try:
+            usages = finish()
+        except Exception:
+            LOGGER.warning("Failed to finish usage collection.", exc_info=True)
+            return
+        for usage in usages:
+            self._record_token_usage(usage)
+
+    def _record_token_usage(self, usage: AgentTokenUsage) -> None:
+        repository = self._task_repository
+        if repository is None:
+            return
+        try:
+            repository.append_token_usage(usage)
+        except Exception:
+            LOGGER.warning("Failed to persist token usage.", exc_info=True)
 
 
 def _status_for_progress_message(message: str) -> TaskStatus | None:

@@ -44,6 +44,17 @@ class SqlOptimizationRequest(BaseModel):
     dingtalk: DingTalkContext | None = None
 
 
+class AgentTokenUsage(BaseModel):
+    task_id: str
+    provider: str = "qwen"
+    model: str
+    operation: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    raw_usage: dict[str, Any] = Field(default_factory=dict)
+
+
 class TableReference(BaseModel):
     schema_name: str | None = None
     table_name: str
