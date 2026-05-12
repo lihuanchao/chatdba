@@ -13,6 +13,8 @@ class FaultPlanStep(BaseModel):
 class FaultDiagnosisProfile(BaseModel):
     input_text: str
     system_name: str | None = None
+    management_ip: str | None = None
+    business_ip: str | None = None
     primary_ip: str | None = None
     start_time: str
     end_time: str

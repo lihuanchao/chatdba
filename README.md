@@ -193,3 +193,50 @@ To backfill embeddings for existing historical cases:
 ```bash
 python scripts/backfill_case_embeddings.py --limit 100
 ```
+
+## Fault Diagnosis Metric Source (MCP First)
+
+The fault diagnosis workflow fetches metric time-series with this priority:
+
+1. Prometheus MCP over SSE
+2. Prometheus HTTP `query_range` API (fallback)
+
+MCP defaults are aligned with the current smart-diagnosis setup:
+
+```text
+FAULT_PROMETHEUS_MCP_SSE_URL=http://10.186.42.51:8080/sse
+FAULT_PROMETHEUS_MCP_HEADERS_JSON={}
+FAULT_PROMETHEUS_MCP_TIMEOUT_SECONDS=50
+FAULT_PROMETHEUS_MCP_SSE_READ_TIMEOUT_SECONDS=50
+```
+
+Optional HTTP fallback settings:
+
+```text
+FAULT_PROMETHEUS_BASE_URL=
+FAULT_PROMETHEUS_TIMEOUT_SECONDS=8
+FAULT_METRIC_STEP_SECONDS=60
+```
+
+Alert payloads are expected to contain the database management IP. Metric queries
+use the business IP, so fault diagnosis resolves the management IP through the
+CMDB table before querying Prometheus:
+
+```text
+FAULT_CMDB_TABLE=cmd_hosts
+```
+
+Required CMDB columns:
+
+```sql
+management_ip text primary key,
+business_ip text not null,
+system_name text not null
+```
+
+Example seed row:
+
+```sql
+insert into cmd_hosts (management_ip, business_ip, system_name)
+values ('10.186.17.54', '10.186.17.55', '订单系统');
+```

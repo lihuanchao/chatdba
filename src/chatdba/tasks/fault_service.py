@@ -5,6 +5,7 @@ from uuid import uuid4
 from chatdba.domain.models import DingTalkContext, TaskStatus
 from chatdba.tasks.service import OptimizationTaskExecution
 from chatdba.worker.run_fault_diagnosis import (
+    CmdbResolver,
     MetricAgent,
     ProgressSink,
     TopSqlAgent,
@@ -28,12 +29,14 @@ class FaultDiagnosisTaskService:
         *,
         top_sql_agent: TopSqlAgent | None = None,
         metric_agent: MetricAgent | None = None,
+        cmdb_resolver: CmdbResolver | None = None,
         qwen_gateway=None,
         task_runner: FaultDiagnosisTaskRunner = run_fault_diagnosis_task,
         task_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._top_sql_agent = top_sql_agent
         self._metric_agent = metric_agent
+        self._cmdb_resolver = cmdb_resolver
         self._qwen_gateway = qwen_gateway
         self._task_runner = task_runner
         self._task_id_factory = task_id_factory or (lambda: str(uuid4()))
@@ -62,6 +65,7 @@ class FaultDiagnosisTaskService:
                 task_payload,
                 top_sql_agent=self._top_sql_agent,
                 metric_agent=self._metric_agent,
+                cmdb_resolver=self._cmdb_resolver,
                 qwen_gateway=self._qwen_gateway,
                 progress_sink=progress_sink,
             )

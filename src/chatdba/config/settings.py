@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     fault_top_sql_database: str = "performance_schema"
     fault_top_sql_min_running_seconds: int = 10
     fault_top_sql_limit: int = 10
+    fault_cmdb_table: str = "cmd_hosts"
+    fault_prometheus_mcp_sse_url: str = "http://10.186.42.51:8080/sse"
+    fault_prometheus_mcp_headers_json: str = "{}"
+    fault_prometheus_mcp_timeout_seconds: int = 50
+    fault_prometheus_mcp_sse_read_timeout_seconds: int = 50
     fault_prometheus_base_url: str = ""
     fault_prometheus_timeout_seconds: int = 8
     fault_metric_step_seconds: int = 60

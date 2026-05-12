@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import itertools
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlencode
 import urllib.request
 
@@ -40,6 +41,158 @@ class MysqlQueryClient(Protocol):
 class PrometheusRangeClient(Protocol):
     def range_query(self, *, query: str, start: str, end: str, step: str):
         raise NotImplementedError
+
+
+class PrometheusMcpClient:
+    def __init__(
+        self,
+        *,
+        sse_url: str,
+        headers: dict[str, str] | None = None,
+        timeout_seconds: int = 50,
+        sse_read_timeout_seconds: int = 50,
+        opener=None,
+    ) -> None:
+        self._sse_url = sse_url
+        self._headers = headers or {}
+        self._timeout_seconds = timeout_seconds
+        self._sse_read_timeout_seconds = sse_read_timeout_seconds
+        self._opener = opener or urllib.request.urlopen
+        self._session_id: str | None = None
+        self._messages_url: str | None = None
+        self._request_ids = itertools.count(1)
+        self._tool_name: str | None = None
+
+    def range_query(self, *, query: str, start: str, end: str, step: str):
+        self._ensure_session()
+        payload = self._jsonrpc_call(
+            "tools/call",
+            {
+                "name": self._resolve_range_tool_name(),
+                "arguments": {
+                    "query": query,
+                    "start": start,
+                    "end": end,
+                    "step": step,
+                },
+            },
+        )
+        return _normalize_mcp_result_to_prometheus_payload(payload)
+
+    def _ensure_session(self) -> None:
+        if self._messages_url and self._session_id:
+            return
+        self._messages_url = self._discover_messages_url()
+        init_response = self._jsonrpc_call(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "chatdba", "version": "0.1.0"},
+            },
+            require_session=False,
+        )
+        if not isinstance(init_response, dict):
+            raise TypeError("MCP initialize result is invalid.")
+        self._jsonrpc_notify("notifications/initialized")
+
+    def _resolve_range_tool_name(self) -> str:
+        if self._tool_name:
+            return self._tool_name
+        result = self._jsonrpc_call("tools/list", {})
+        tools = result.get("tools") if isinstance(result, dict) else None
+        if not isinstance(tools, list):
+            raise RuntimeError("MCP tools/list did not return tools.")
+        names = {
+            str(item.get("name"))
+            for item in tools
+            if isinstance(item, dict) and item.get("name")
+        }
+        for candidate in ("execute_range_query", "query_range", "range_query"):
+            if candidate in names:
+                self._tool_name = candidate
+                return candidate
+        raise RuntimeError("Prometheus MCP range query tool not found.")
+
+    def _discover_messages_url(self) -> str:
+        request = urllib.request.Request(self._sse_url, method="GET")
+        for key, value in self._headers.items():
+            request.add_header(key, value)
+        with self._opener(request, timeout=self._sse_read_timeout_seconds) as response:
+            headers = _response_headers_dict(response)
+            session_id = headers.get("mcp-session-id")
+            endpoint_data = _read_sse_event_data(response, event_name="endpoint")
+        if not endpoint_data:
+            raise RuntimeError("MCP SSE endpoint did not provide messages URL.")
+        if endpoint_data.startswith("http://") or endpoint_data.startswith("https://"):
+            messages_url = endpoint_data
+        else:
+            base = self._sse_url.rstrip("/")
+            messages_url = f"{base}{endpoint_data}"
+        if not session_id:
+            session_id = _extract_session_id_from_messages_url(messages_url)
+        self._session_id = session_id
+        return messages_url
+
+    def _jsonrpc_call(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        require_session: bool = True,
+    ) -> dict[str, Any]:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": next(self._request_ids),
+            "method": method,
+            "params": params,
+        }
+        response = self._post_json(payload, require_session=require_session)
+        if not isinstance(response, dict):
+            raise TypeError("MCP response is not a JSON object.")
+        if "error" in response:
+            message = _stringify_jsonrpc_error(response["error"])
+            raise RuntimeError(f"MCP {method} failed: {message}")
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise TypeError(f"MCP {method} returned invalid result.")
+        return result
+
+    def _jsonrpc_notify(self, method: str) -> None:
+        payload = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": {},
+        }
+        self._post_json(payload, require_session=True)
+
+    def _post_json(
+        self,
+        payload: dict[str, Any],
+        *,
+        require_session: bool,
+    ) -> dict[str, Any] | None:
+        if not self._messages_url:
+            raise RuntimeError("MCP messages URL not initialized.")
+        request = urllib.request.Request(
+            self._messages_url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+        )
+        request.add_header("Content-Type", "application/json")
+        request.add_header("Accept", "application/json")
+        for key, value in self._headers.items():
+            request.add_header(key, value)
+        if require_session and self._session_id:
+            request.add_header("Mcp-Session-Id", self._session_id)
+        with self._opener(request, timeout=self._timeout_seconds) as response:
+            headers = _response_headers_dict(response)
+            if not self._session_id:
+                self._session_id = headers.get("mcp-session-id")
+            body = response.read().decode("utf-8").strip()
+        if not body:
+            return None
+        return json.loads(body)
 
 
 class MysqlTopSqlAgent:
@@ -159,12 +312,14 @@ class PrometheusMetricAgent:
     def __init__(
         self,
         *,
+        mcp_client: PrometheusRangeClient | None = None,
         client: PrometheusRangeClient | None = None,
         base_url: str = "",
         opener=None,
         timeout_seconds: int = 8,
         step_seconds: int = 60,
     ) -> None:
+        self._mcp_client = mcp_client
         self._client = client
         self._base_url = base_url
         self._opener = opener
@@ -172,41 +327,52 @@ class PrometheusMetricAgent:
         self._step_seconds = step_seconds
 
     def analyze(self, profile: FaultDiagnosisProfile) -> MetricEvidence:
-        if not profile.primary_ip:
+        metric_ip = profile.business_ip
+        if not metric_ip:
             return MetricEvidence(
                 status="failure",
                 metrics=[],
-                error_message="缺少数据库服务器 IP，无法查询监控指标。",
+                error_message=(
+                    "缺少业务 IP，无法查询监控指标；请在 CMDB 表中维护管理 IP 到业务 IP 的映射。"
+                ),
             )
-        if self._client is None and not self._base_url:
+        if self._mcp_client is None and self._client is None and not self._base_url:
             return MetricEvidence(
                 status="failure",
                 metrics=[],
                 error_message="Prometheus 数据源未配置。",
             )
 
-        query = _cpu_usage_query(profile.primary_ip)
+        query = _cpu_usage_query(metric_ip)
         start = _to_prometheus_utc(profile.start_time)
         end = _to_prometheus_utc(profile.end_time)
         step = f"{self._step_seconds}s"
-        try:
-            payload = self._client_for().range_query(
-                query=query,
-                start=start,
-                end=end,
-                step=step,
-            )
-            series = _metric_series_from_payload(
-                payload,
-                metric_name="cpu_usage",
-                default_ip=profile.primary_ip,
-                unit="%",
-            )
-        except Exception as exc:
+        errors: list[str] = []
+        series: list[MetricSeries] | None = None
+        for candidate in self._clients_in_order():
+            try:
+                payload = candidate.range_query(
+                    query=query,
+                    start=start,
+                    end=end,
+                    step=step,
+                )
+                series = _metric_series_from_payload(
+                    payload,
+                    metric_name="cpu_usage",
+                    default_ip=metric_ip,
+                    unit="%",
+                )
+                break
+            except Exception as exc:
+                errors.append(str(exc) or exc.__class__.__name__)
+                continue
+
+        if series is None:
             return MetricEvidence(
                 status="failure",
                 metrics=[],
-                error_message=str(exc) or exc.__class__.__name__,
+                error_message=" | ".join(errors) or "prometheus_query_failed",
             )
 
         return MetricEvidence(
@@ -215,7 +381,19 @@ class PrometheusMetricAgent:
             summary=_metric_summary(series),
         )
 
+    def _clients_in_order(self) -> list[PrometheusRangeClient]:
+        clients: list[PrometheusRangeClient] = []
+        if self._mcp_client is not None:
+            clients.append(self._mcp_client)
+        if self._client is not None or bool(self._base_url):
+            clients.append(self._client_for_http())
+        return clients
+
     def _client_for(self) -> PrometheusRangeClient:
+        # backward compatible alias for existing tests/callers
+        return self._client_for_http()
+
+    def _client_for_http(self) -> PrometheusRangeClient:
         if self._client is not None:
             return self._client
         return PrometheusHttpClient(
@@ -317,6 +495,158 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _response_headers_dict(response: Any) -> dict[str, str]:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return {}
+    if hasattr(headers, "items"):
+        return {str(k).lower(): str(v) for k, v in headers.items()}
+    return {}
+
+
+def _read_sse_event_data(response: Any, *, event_name: str | None = None) -> str:
+    current_event: str | None = None
+    data_lines: list[str] = []
+    while True:
+        raw = response.readline()
+        if raw in (b"", ""):
+            break
+        line = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+        line = line.rstrip("\r\n")
+        if not line:
+            if data_lines and (event_name is None or current_event == event_name):
+                return "\n".join(data_lines)
+            current_event = None
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            current_event = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line.split(":", 1)[1].lstrip())
+            continue
+    return ""
+
+
+def _extract_session_id_from_messages_url(messages_url: str) -> str | None:
+    marker = "session_id="
+    index = messages_url.find(marker)
+    if index == -1:
+        return None
+    raw = messages_url[index + len(marker):]
+    if "&" in raw:
+        raw = raw.split("&", 1)[0]
+    return raw or None
+
+
+def _stringify_jsonrpc_error(error: Any) -> str:
+    if isinstance(error, dict):
+        message = error.get("message")
+        code = error.get("code")
+        if message and code is not None:
+            return f"code={code}, message={message}"
+        if message:
+            return str(message)
+    return str(error)
+
+
+def _normalize_mcp_result_to_prometheus_payload(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("isError") is True:
+        message = _extract_tool_message_text(result) or "MCP tool returned error."
+        raise RuntimeError(message)
+
+    content = result.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            candidate = _json_from_text_payload(text)
+            if isinstance(candidate, dict):
+                normalized = _normalize_known_metric_payload(candidate)
+                if normalized is not None:
+                    return normalized
+        raise RuntimeError("MCP tools/call returned no parseable metric payload.")
+
+    normalized = _normalize_known_metric_payload(result)
+    if normalized is not None:
+        return normalized
+
+    raise RuntimeError("Unsupported MCP metric payload format.")
+
+
+def _extract_tool_message_text(result: dict[str, Any]) -> str | None:
+    content = result.get("content")
+    if not isinstance(content, list):
+        return None
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return None
+
+
+def _json_from_text_payload(text: str) -> dict[str, Any] | None:
+    candidate = text.strip()
+    if not candidate:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _normalize_known_metric_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(payload.get("data"), dict):
+        data = payload["data"]
+        if isinstance(data.get("result"), list):
+            return {"status": "success", "data": {"result": data["result"]}}
+
+    data = payload.get("data")
+    if isinstance(data, dict):
+        metrics = data.get("metrics")
+        if isinstance(metrics, list):
+            return {
+                "status": "success",
+                "data": {"result": _metric_result_from_agent_metrics(metrics)},
+            }
+    if isinstance(payload.get("metrics"), list):
+        return {
+            "status": "success",
+            "data": {"result": _metric_result_from_agent_metrics(payload["metrics"])},
+        }
+    return None
+
+
+def _metric_result_from_agent_metrics(metrics: list[Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in metrics:
+        if not isinstance(item, dict):
+            continue
+        ip = item.get("ip")
+        metric = {"ip": str(ip)} if ip is not None else {}
+        values: list[list[Any]] = []
+        raw_values = item.get("values")
+        if isinstance(raw_values, list):
+            for point in raw_values:
+                if not isinstance(point, dict):
+                    continue
+                ts = point.get("timestamp")
+                val = point.get("value")
+                if ts is None or val is None:
+                    continue
+                values.append([ts, str(val)])
+        result.append({"metric": metric, "values": values})
+    return result
 
 
 def _optional_float(value: object) -> float | None:

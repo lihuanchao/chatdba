@@ -55,6 +55,11 @@ def test_settings_expose_fault_diagnosis_data_source_options():
     assert settings.fault_top_sql_database == "performance_schema"
     assert settings.fault_top_sql_min_running_seconds == 10
     assert settings.fault_top_sql_limit == 10
+    assert settings.fault_cmdb_table == "cmd_hosts"
+    assert settings.fault_prometheus_mcp_sse_url == "http://10.186.42.51:8080/sse"
+    assert settings.fault_prometheus_mcp_headers_json == "{}"
+    assert settings.fault_prometheus_mcp_timeout_seconds == 50
+    assert settings.fault_prometheus_mcp_sse_read_timeout_seconds == 50
     assert settings.fault_prometheus_base_url == ""
     assert settings.fault_metric_step_seconds == 60
 
@@ -67,6 +72,10 @@ def test_build_fault_runtime_wires_mysql_and_prometheus_agents():
         fault_top_sql_password="secret",
         fault_top_sql_port=8801,
         fault_prometheus_base_url="http://prometheus.example",
+        metadata_mysql_host="metadata.example",
+        metadata_mysql_user="metadata",
+        metadata_mysql_password="metadata-secret",
+        metadata_mysql_database="chatdba",
     )
     runtime = build_fault_diagnosis_runtime(
         settings,
@@ -89,3 +98,6 @@ def test_build_fault_runtime_wires_mysql_and_prometheus_agents():
     assert pymysql_module.connect_kwargs["port"] == 8801
     assert pymysql_module.connect_kwargs["database"] == "performance_schema"
     assert runtime.metric_agent._base_url == "http://prometheus.example"
+    assert runtime.metric_agent._mcp_client is not None
+    assert runtime.metric_agent._mcp_client._sse_url == "http://10.186.42.51:8080/sse"
+    assert runtime.cmdb_resolver is not None

@@ -40,7 +40,7 @@ class FakeMetricAgent:
             metrics=[
                 MetricSeries(
                     metric_name="cpu_usage",
-                    ip="10.186.17.54",
+                    ip=profile.business_ip or "",
                     unit="%",
                     values=[
                         MetricPoint(timestamp=1777527000, value=91.2),
@@ -52,12 +52,23 @@ class FakeMetricAgent:
         )
 
 
+class FakeCmdbResolver:
+    def resolve_by_management_ip(self, management_ip: str):
+        assert management_ip == "10.186.17.54"
+        return {
+            "management_ip": management_ip,
+            "business_ip": "10.186.17.55",
+            "system_name": "订单系统",
+        }
+
+
 def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_report():
     top_sql_agent = FakeTopSqlAgent()
     metric_agent = FakeMetricAgent()
     graph = build_fault_diagnosis_graph(
         top_sql_agent=top_sql_agent,
         metric_agent=metric_agent,
+        cmdb_resolver=FakeCmdbResolver(),
     )
 
     result = graph.invoke(
@@ -75,6 +86,8 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     report = result["report"]
 
     assert profile.system_name == "订单系统"
+    assert profile.management_ip == "10.186.17.54"
+    assert profile.business_ip == "10.186.17.55"
     assert profile.primary_ip == "10.186.17.54"
     assert profile.start_time == "2026-04-30 14:00:00"
     assert profile.end_time == "2026-04-30 15:00:00"
@@ -84,5 +97,6 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "### 一、问题简述" in report.markdown
     assert "订单系统" in report.markdown
     assert "10.186.17.54" in report.markdown
+    assert "10.186.17.55" in report.markdown
     assert "select * from orders" in report.markdown
     assert "CPU 使用率持续高于 90%" in report.markdown

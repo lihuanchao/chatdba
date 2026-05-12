@@ -31,6 +31,11 @@ class MetricAgent(Protocol):
         raise NotImplementedError
 
 
+class CmdbResolver(Protocol):
+    def resolve_by_management_ip(self, management_ip: str):
+        raise NotImplementedError
+
+
 class FaultDiagnosisState(TypedDict, total=False):
     task_id: str
     input_text: str
@@ -64,6 +69,7 @@ def build_fault_diagnosis_graph(
     *,
     top_sql_agent: TopSqlAgent | None = None,
     metric_agent: MetricAgent | None = None,
+    cmdb_resolver: CmdbResolver | None = None,
     qwen_gateway: FaultDiagnosisGateway | None = None,
 ):
     graph = StateGraph(FaultDiagnosisState)
@@ -74,6 +80,7 @@ def build_fault_diagnosis_graph(
         profile = _build_profile(
             input_text=state["input_text"],
             current_time=state.get("current_time"),
+            cmdb_resolver=cmdb_resolver,
             qwen_gateway=qwen_gateway,
         )
         return {"profile": profile}
@@ -123,14 +130,20 @@ def _build_profile(
     *,
     input_text: str,
     current_time: datetime | None,
+    cmdb_resolver: CmdbResolver | None,
     qwen_gateway: FaultDiagnosisGateway | None,
 ) -> FaultDiagnosisProfile:
-    profile = _fallback_profile(input_text=input_text, current_time=current_time)
+    profile = _fallback_profile(
+        input_text=input_text,
+        current_time=current_time,
+        cmdb_resolver=cmdb_resolver,
+    )
     if qwen_gateway is None:
         return profile
     qwen_profile = _profile_with_qwen(
         input_text=input_text,
         current_time=current_time,
+        cmdb_resolver=cmdb_resolver,
         qwen_gateway=qwen_gateway,
     )
     return qwen_profile or profile
@@ -140,19 +153,27 @@ def _fallback_profile(
     *,
     input_text: str,
     current_time: datetime | None,
+    cmdb_resolver: CmdbResolver | None = None,
 ) -> FaultDiagnosisProfile:
     now = current_time or datetime.now()
     start_time, end_time = _time_window(input_text, now)
-    primary_ip = _extract_first_ip(input_text)
+    management_ip = _extract_first_ip(input_text)
+    cmdb_record = _resolve_cmdb_record(cmdb_resolver, management_ip)
+    business_ip = _cmdb_value(cmdb_record, "business_ip")
+    primary_ip = management_ip
     system_name = _extract_system_name(input_text)
+    if not system_name:
+        system_name = _cmdb_value(cmdb_record, "system_name")
     missing_fields: list[str] = []
-    if not (primary_ip or system_name):
+    if not (management_ip or system_name):
         missing_fields.append("system_name_or_ip")
+    if management_ip and not business_ip:
+        missing_fields.append("business_ip")
 
     query_background = _query_background(
         input_text=input_text,
         system_name=system_name,
-        primary_ip=primary_ip,
+        primary_ip=management_ip,
         start_time=start_time,
         end_time=end_time,
     )
@@ -163,8 +184,11 @@ def _fallback_profile(
             agent="metric",
             date=date,
             query_background=query_background,
-            query="查询数据库服务器 CPU 使用率等关键监控指标，判断是否存在资源水位异常。",
-            reason="CPU、连接数或线程异常是数据库故障诊断的优先证据。",
+            query=(
+                "通过 CMDB 将告警中的管理 IP 转换为业务 IP，"
+                "再查询数据库服务器 CPU 使用率等关键监控指标。"
+            ),
+            reason="监控指标按业务 IP 打标，必须先完成管理 IP 到业务 IP 的映射。",
         ),
         FaultPlanStep(
             step_id=2,
@@ -178,6 +202,8 @@ def _fallback_profile(
     return FaultDiagnosisProfile(
         input_text=input_text,
         system_name=system_name,
+        management_ip=management_ip,
+        business_ip=business_ip,
         primary_ip=primary_ip,
         start_time=start_time,
         end_time=end_time,
@@ -191,9 +217,14 @@ def _profile_with_qwen(
     *,
     input_text: str,
     current_time: datetime | None,
+    cmdb_resolver: CmdbResolver | None,
     qwen_gateway: FaultDiagnosisGateway,
 ) -> FaultDiagnosisProfile | None:
-    fallback = _fallback_profile(input_text=input_text, current_time=current_time)
+    fallback = _fallback_profile(
+        input_text=input_text,
+        current_time=current_time,
+        cmdb_resolver=cmdb_resolver,
+    )
     user_prompt = json.dumps(
         {
             "input_text": input_text,
@@ -209,7 +240,8 @@ def _profile_with_qwen(
             "你是数据库故障诊断调度专家，请只返回 FaultDiagnosisProfile JSON。",
             user_prompt,
         )
-        return FaultDiagnosisProfile.model_validate(json.loads(payload))
+        profile = FaultDiagnosisProfile.model_validate(json.loads(payload))
+        return _merge_profile_cmdb_fields(profile, fallback)
     except Exception:
         return None
 
@@ -313,7 +345,8 @@ def _fallback_report(
             (
                 f"{profile.start_time} 到 {profile.end_time}，"
                 f"{profile.system_name or '未知系统'}"
-                f"（{profile.primary_ip or '未识别IP'}）发生数据库告警或异常："
+                f"（管理IP：{profile.management_ip or profile.primary_ip or '未识别IP'}，"
+                f"业务IP：{profile.business_ip or '未匹配'}）发生数据库告警或异常："
                 f"{profile.input_text}"
             ),
             "",
@@ -431,6 +464,49 @@ def _time_window(input_text: str, now: datetime) -> tuple[str, str]:
 def _extract_first_ip(text: str) -> str | None:
     match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
     return match.group(0) if match else None
+
+
+def _resolve_cmdb_record(cmdb_resolver: CmdbResolver | None, management_ip: str | None):
+    if cmdb_resolver is None or not management_ip:
+        return None
+    try:
+        return cmdb_resolver.resolve_by_management_ip(management_ip)
+    except Exception:
+        return None
+
+
+def _cmdb_value(record: object, field_name: str) -> str | None:
+    if record is None:
+        return None
+    if isinstance(record, dict):
+        value = record.get(field_name)
+    else:
+        value = getattr(record, field_name, None)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _merge_profile_cmdb_fields(
+    profile: FaultDiagnosisProfile,
+    fallback: FaultDiagnosisProfile,
+) -> FaultDiagnosisProfile:
+    management_ip = profile.management_ip or fallback.management_ip or profile.primary_ip
+    business_ip = profile.business_ip or fallback.business_ip
+    system_name = profile.system_name or fallback.system_name
+    missing_fields = list(dict.fromkeys([*profile.missing_fields, *fallback.missing_fields]))
+    if management_ip and business_ip and "business_ip" in missing_fields:
+        missing_fields.remove("business_ip")
+    return profile.model_copy(
+        update={
+            "management_ip": management_ip,
+            "business_ip": business_ip,
+            "primary_ip": profile.primary_ip or management_ip,
+            "system_name": system_name,
+            "missing_fields": missing_fields,
+        }
+    )
 
 
 def _extract_system_name(text: str) -> str | None:

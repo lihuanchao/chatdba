@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 from chatdba.workflow.fault_diagnosis import (
+    CmdbResolver,
     MetricAgent,
     TopSqlAgent,
     build_fault_diagnosis_graph,
@@ -14,6 +15,7 @@ def run_fault_diagnosis_task(
     *,
     top_sql_agent: TopSqlAgent | None = None,
     metric_agent: MetricAgent | None = None,
+    cmdb_resolver: CmdbResolver | None = None,
     qwen_gateway=None,
     progress_sink: ProgressSink | None = None,
 ) -> dict[str, object]:
@@ -22,6 +24,7 @@ def run_fault_diagnosis_task(
     graph = build_fault_diagnosis_graph(
         top_sql_agent=top_sql_agent,
         metric_agent=metric_agent,
+        cmdb_resolver=cmdb_resolver,
         qwen_gateway=qwen_gateway,
     )
     if progress_sink:

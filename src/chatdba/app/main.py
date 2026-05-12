@@ -129,6 +129,7 @@ def _build_fault_task_service() -> FaultDiagnosisTaskService:
     return FaultDiagnosisTaskService(
         top_sql_agent=fault_runtime.top_sql_agent,
         metric_agent=fault_runtime.metric_agent,
+        cmdb_resolver=fault_runtime.cmdb_resolver,
         qwen_gateway=_build_qwen_gateway(settings),
     )
 
