@@ -6,7 +6,6 @@ def render_report_for_dingtalk(report: OptimizationReport) -> str:
         "# SQL优化报告",
         "",
         "## 任务信息",
-        f"- 任务ID：`{report.task_id}`",
         f"- 证据级别：`{report.evidence_status.value}`",
         f"- 置信度：`{report.confidence_label.value}` ({report.confidence:.2f})",
         "",
@@ -47,16 +46,6 @@ def render_report_for_dingtalk(report: OptimizationReport) -> str:
             lines.append("```")
     else:
         lines.append("- 暂无明确索引建议，请结合 WHERE/JOIN/ORDER BY 列人工评估。")
-
-    if report.risks:
-        lines.extend(["", "## 风险提示"])
-        for risk in report.risks:
-            lines.append(f"- [{risk.level}] {risk.description}")
-
-    if report.validation_steps:
-        lines.extend(["", "## 验证步骤"])
-        for step in report.validation_steps:
-            lines.append(f"- {step}")
 
     if report.similar_cases:
         lines.extend(["", "## 相似案例"])
