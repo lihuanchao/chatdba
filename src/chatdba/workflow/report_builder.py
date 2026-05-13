@@ -163,7 +163,6 @@ class OptimizationReportComposer:
     ) -> OptimizationReport:
         confidence, confidence_label = self._confidence_for(evidence.status)
         limitations = self._limitations_for(evidence)
-        summary = self._build_summary(findings, evidence.status)
         problem_profile = self._build_problem_profile(
             raw_sql=raw_sql,
             sql_features=sql_features,
@@ -180,6 +179,11 @@ class OptimizationReportComposer:
         selected_cases = self._select_cases_for_query(case_query)
         self._record_case_retrieval_debug(case_query, selected_cases)
         similar_cases = similar_cases_for_report(selected_cases, case_query)
+        summary = self._build_summary(
+            findings=findings,
+            evidence=evidence,
+            similar_cases=similar_cases,
+        )
         sql_rewrites = self._build_sql_rewrites(raw_sql, findings)
         index_recommendations = self._build_index_recommendations(sql_features, findings)
         risks = self._build_risks(evidence.status)
@@ -305,10 +309,21 @@ class OptimizationReportComposer:
 
     def _build_summary(
         self,
+        *,
         findings: list[RuleFinding],
-        status: EvidenceStatus,
+        evidence: EvidenceEnvelope,
+        similar_cases,
     ) -> str:
+        status = evidence.status
+        explain_text = json.dumps(evidence.explain_json or {}, ensure_ascii=False).lower()
+        has_filesort = "filesort" in explain_text
+        has_ddl = bool(evidence.create_tables)
+        has_case = bool(similar_cases)
         if findings:
+            if has_filesort:
+                return "执行计划显示存在 filesort，结合规则判断当前 ORDER BY/LIMIT 需要更匹配的索引或重写。"
+            if has_ddl and has_case:
+                return "结合表结构与关联案例，当前 SQL 的主要问题已具备明确证据支撑，建议优先处理索引与写法匹配。"
             return findings[0].message
         if status == EvidenceStatus.SQL_ONLY:
             return "当前为 SQL-only 分析：基于 SQL 文本、规则与历史案例给出优化建议。"

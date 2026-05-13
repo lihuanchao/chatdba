@@ -63,6 +63,9 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
             if "SQL问题画像" in system_prompt:
                 return EMPTY_PROBLEM_PROFILE_JSON
             assert "SQL优化报告" in system_prompt
+            assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in system_prompt
+            assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in system_prompt
+            assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in system_prompt
             assert "filesort fixed" in user_prompt
             return """
             {
@@ -292,11 +295,68 @@ def test_report_builder_selects_cases_by_environment_plan_and_root_cause():
     )
 
 
+def test_report_builder_fallback_summary_references_plan_or_ddl_evidence():
+    composer = OptimizationReportComposer(
+        cases=[
+            OptimizationCase(
+                case_id="case-filesort-1",
+                db_type="mysql",
+                db_version_major="8.0",
+                sql_type="select",
+                scenario_tags=["order_by", "limit"],
+                plan_symptom_tags=["using_filesort"],
+                root_cause_tags=["missing_composite_index"],
+                case_card="filesort case",
+                quality_score=0.9,
+            )
+        ]
+    )
+
+    report = composer.compose(
+        task_id="task-1",
+        raw_sql="select * from orders order by created_at desc limit 20",
+        sql_features=SqlFeatures(
+            fingerprint="fp",
+            statement_type="select",
+            tables=[TableReference(schema_name="shop", table_name="orders")],
+            order_by=["created_at DESC"],
+            has_limit=True,
+        ),
+        evidence=EvidenceEnvelope(
+            status=EvidenceStatus.FULL,
+            route=SourceRoute(
+                instance_id="mysql-1",
+                db_type="mysql",
+                version="8.0.36",
+            ),
+            explain_json={"query_block": {"ordering_operation": {"using_filesort": True}}},
+            create_tables={
+                "shop.orders": (
+                    "CREATE TABLE orders (tenant_id bigint, status tinyint, "
+                    "created_at datetime, user_id bigint)"
+                )
+            },
+        ),
+        findings=[
+            RuleFinding(
+                code="limit_with_order_by",
+                severity="medium",
+                message="ORDER BY with LIMIT may require a supporting index.",
+            )
+        ],
+    )
+
+    assert "filesort" in report.summary.lower() or "执行计划" in report.summary
+
+
 def test_report_builder_loads_markdown_system_prompt_file():
     prompt = _load_system_prompt()
 
     assert "# ChatDBA SQL优化报告生成提示词（中文）" in prompt
     assert "仅返回合法 JSON" in prompt
+    assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in prompt
+    assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in prompt
+    assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in prompt
 
 
 def test_report_builder_uses_case_retriever_when_available():
