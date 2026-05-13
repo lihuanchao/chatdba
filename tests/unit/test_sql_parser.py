@@ -19,3 +19,10 @@ def test_parse_sql_features_ignores_cte_names_as_physical_tables():
     )
 
     assert [table.table_name for table in features.tables] == ["orders"]
+
+
+def test_parse_sql_features_preserves_schema_qualified_table_names():
+    features = parse_sql_features("select * from shop.orders")
+
+    assert features.tables[0].schema_name == "shop"
+    assert features.tables[0].table_name == "orders"

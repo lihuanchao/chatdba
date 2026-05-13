@@ -109,7 +109,7 @@ def test_router_returns_single_instance_route():
     assert route.collection_errors == []
 
 
-def test_router_resolves_unqualified_single_table_by_table_name():
+def test_router_asks_for_schema_when_unqualified_single_table_is_ambiguous():
     repository = FakeMetadataRouteRepository(
         [
             MetadataRouteRow(
@@ -144,6 +144,49 @@ def test_router_resolves_unqualified_single_table_by_table_name():
 
     route = router.resolve(
         [MysqlTableTarget(schema_name=None, table_name="orders")]
+    )
+
+    assert route.status == EvidenceStatus.SQL_ONLY
+    assert route.route is None
+    assert "orders" in route.collection_errors[0]
+    assert "请补充库名" in route.collection_errors[0]
+
+
+def test_router_resolves_schema_qualified_table_when_same_table_name_exists_elsewhere():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="shop",
+                table_name="orders",
+                instance_id="mysql-order-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="archive",
+                table_name="orders",
+                instance_id="mysql-order-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    route = router.resolve(
+        [MysqlTableTarget(schema_name="shop", table_name="orders")]
     )
 
     assert route.status == EvidenceStatus.FULL

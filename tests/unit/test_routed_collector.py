@@ -120,6 +120,28 @@ def test_routed_collector_preserves_sql_only_when_router_cannot_route():
     assert "未找到一个或多个表的路由信息" in evidence.collection_errors[0]
 
 
+def test_routed_collector_preserves_sql_only_when_unqualified_table_is_ambiguous():
+    collector = RoutedMysqlEvidenceCollector(
+        router=FakeRouter(
+            EvidenceEnvelope(
+                status=EvidenceStatus.SQL_ONLY,
+                missing_evidence=["route_info", "explain_json", "create_table"],
+                collection_errors=["以下表名在元数据库中存在重复，请补充库名后重试：orders"],
+            )
+        ),
+        connection_factory=FakeConnectionFactory(SuccessfulMysqlClient()),
+    )
+
+    evidence = collector.collect(
+        "select * from orders",
+        [MysqlTableTarget(schema_name=None, table_name="orders")],
+    )
+
+    assert evidence.status == EvidenceStatus.SQL_ONLY
+    assert evidence.route is None
+    assert "请补充库名" in evidence.collection_errors[0]
+
+
 def test_routed_collector_uses_router_resolved_tables_for_ddl_lookup():
     class ResolvedTableRouter(FakeRouter):
         def resolve_with_tables(self, tables):

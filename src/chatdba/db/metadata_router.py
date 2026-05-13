@@ -136,6 +136,20 @@ class MetadataRouter:
                 ],
             ), []
 
+        ambiguous_unqualified = self._ambiguous_unqualified_tables(
+            tables,
+            enabled_candidates,
+        )
+        if ambiguous_unqualified:
+            return EvidenceEnvelope(
+                status=EvidenceStatus.SQL_ONLY,
+                missing_evidence=["route_info", "explain_json", "create_table"],
+                collection_errors=[
+                    "以下表名在元数据库中存在重复，请补充库名后重试："
+                    + ", ".join(sorted(ambiguous_unqualified))
+                ],
+            ), []
+
         selection = self._select_route_plan(tables, enabled_candidates)
         if selection is None:
             message = (
@@ -236,6 +250,34 @@ class MetadataRouter:
             ),
         )[0]
         return best[3], best[2]
+
+    def _ambiguous_unqualified_tables(
+        self,
+        tables: list[MysqlTableTarget],
+        candidates: dict[int, list[MetadataRouteRow]],
+    ) -> list[str]:
+        unqualified_indexes = [
+            index for index, table in enumerate(tables) if not table.schema_name
+        ]
+        if not unqualified_indexes:
+            return []
+
+        common_schemas = set(
+            row.schema_name for row in candidates[unqualified_indexes[0]]
+        )
+        for index in unqualified_indexes[1:]:
+            common_schemas &= {
+                row.schema_name for row in candidates[index]
+            }
+        if len(common_schemas) == 1:
+            return []
+
+        ambiguous: list[str] = []
+        for index in unqualified_indexes:
+            schemas = {row.schema_name for row in candidates[index]}
+            if len(schemas) > 1:
+                ambiguous.append(tables[index].table_name)
+        return ambiguous
 
     def _has_common_instance(
         self,
