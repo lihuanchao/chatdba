@@ -321,15 +321,15 @@ class OptimizationReportComposer:
         has_case = bool(similar_cases)
         if findings:
             if has_filesort:
-                return "执行计划显示存在 filesort，结合规则判断当前 ORDER BY/LIMIT 需要更匹配的索引或重写。"
+                return "存在 filesort，需匹配 ORDER BY/LIMIT 索引。"
             if has_ddl and has_case:
-                return "结合表结构与关联案例，当前 SQL 的主要问题已具备明确证据支撑，建议优先处理索引与写法匹配。"
+                return "证据指向索引与写法匹配问题。"
             return findings[0].message
         if status == EvidenceStatus.SQL_ONLY:
-            return "当前为 SQL-only 分析：基于 SQL 文本、规则与历史案例给出优化建议。"
+            return "SQL-only 分析，缺少源库证据。"
         if status == EvidenceStatus.PARTIAL:
-            return "当前为部分证据分析：结合已采集证据与 SQL 规则给出优化建议。"
-        return "当前为完整证据分析：基于执行计划、表结构与 SQL 规则生成建议。"
+            return "证据不完整，建议补齐后验证。"
+        return "证据完整，按执行计划和表结构优化。"
 
     def _build_sql_rewrites(
         self,

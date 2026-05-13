@@ -63,7 +63,8 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
             if "SQL问题画像" in system_prompt:
                 return EMPTY_PROBLEM_PROFILE_JSON
             assert "SQL优化报告" in system_prompt
-            assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in system_prompt
+            assert "`summary` 必须是精简自然语言结论" in system_prompt
+            assert "`summary` 禁止输出命中规则列表" in system_prompt
             assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in system_prompt
             assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in system_prompt
             assert "filesort fixed" in user_prompt
@@ -346,7 +347,29 @@ def test_report_builder_fallback_summary_references_plan_or_ddl_evidence():
         ],
     )
 
-    assert "filesort" in report.summary.lower() or "执行计划" in report.summary
+    assert report.summary == "存在 filesort，需匹配 ORDER BY/LIMIT 索引。"
+    assert "rule" not in report.summary.lower()
+    assert "规则" not in report.summary
+
+
+def test_report_builder_fallback_summary_is_compact_for_sql_only():
+    composer = OptimizationReportComposer(cases=[])
+
+    report = composer.compose(
+        task_id="task-1",
+        raw_sql="select id from orders",
+        sql_features=SqlFeatures(
+            fingerprint="fp",
+            statement_type="select",
+            tables=[TableReference(table_name="orders")],
+        ),
+        evidence=EvidenceEnvelope(status=EvidenceStatus.SQL_ONLY),
+        findings=[],
+    )
+
+    assert report.summary == "SQL-only 分析，缺少源库证据。"
+    assert "rule" not in report.summary.lower()
+    assert "规则" not in report.summary
 
 
 def test_report_builder_loads_markdown_system_prompt_file():
@@ -354,7 +377,8 @@ def test_report_builder_loads_markdown_system_prompt_file():
 
     assert "# ChatDBA SQL优化报告生成提示词（中文）" in prompt
     assert "仅返回合法 JSON" in prompt
-    assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in prompt
+    assert "`summary` 必须是精简自然语言结论" in prompt
+    assert "`summary` 禁止输出命中规则列表" in prompt
     assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in prompt
     assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in prompt
 
