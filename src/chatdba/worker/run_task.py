@@ -21,6 +21,8 @@ def run_sql_optimization_task(
     )
     result = graph.invoke(task_payload)
     if progress_sink:
-        progress_sink("已生成诊断结论...\n")
-        progress_sink("已生成优化报告...\n")
+        if "findings" in result:
+            progress_sink("已生成诊断结论...\n")
+        if "report" in result:
+            progress_sink("已生成优化报告...\n")
     return result

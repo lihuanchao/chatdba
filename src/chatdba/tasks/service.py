@@ -16,6 +16,7 @@ from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.worker.run_task import ProgressSink, run_sql_optimization_task
 
 LOGGER = logging.getLogger(__name__)
+AMBIGUOUS_TABLE_MARKER = "以下表名在元数据库中存在重复，请补充库名后重试："
 
 
 class OptimizationTaskRunner(Protocol):
@@ -121,6 +122,21 @@ class OptimizationTaskService:
             self._record_collected_token_usage()
 
         self._record_case_retrieval_debug_event(request.task_id)
+        missing_schema_error = _missing_schema_error(result)
+        if missing_schema_error is not None:
+            self._record_event(
+                ProgressEvent(
+                    task_id=request.task_id,
+                    status=TaskStatus.FAILED,
+                    message=missing_schema_error,
+                )
+            )
+            return OptimizationTaskExecution(
+                task_id=request.task_id,
+                status=TaskStatus.FAILED,
+                result=result,
+                error=missing_schema_error,
+            )
         self._record_event(
             ProgressEvent(
                 task_id=request.task_id,
@@ -270,3 +286,15 @@ def _case_retrieval_debug_payload(
     if not isinstance(debug, Mapping):
         return None
     return dict(debug)
+
+
+def _missing_schema_error(result: dict[str, object]) -> str | None:
+    evidence = result.get("evidence")
+    errors = getattr(evidence, "collection_errors", None)
+    if not isinstance(errors, list):
+        return None
+    for error in errors:
+        text = str(error)
+        if AMBIGUOUS_TABLE_MARKER in text:
+            return text
+    return None

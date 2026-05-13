@@ -17,6 +17,9 @@ from chatdba.cases.pgvector_retriever import PgVectorCaseRetriever
 from chatdba.cases.repository import load_optimization_cases
 from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_sql_from_message
 from chatdba.dingtalk.handler import (
+    SCHEMA_REQUIRED_MESSAGE_TEMPLATE,
+    _ambiguous_table_names_from_text,
+    _ambiguous_table_names_from_report,
     extract_fault_diagnosis_text,
     is_fault_diagnosis_message,
     is_sql_optimization_message,
@@ -365,8 +368,55 @@ def _stream_events_for_sql(
                 ),
                 progress_sink=emit_progress,
             )
+            ambiguous_tables = _ambiguous_table_names_from_text(execution.error or "")
+            if ambiguous_tables:
+                events.put(
+                    (
+                        "markdown",
+                        {
+                            "text": SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
+                                tables=", ".join(ambiguous_tables),
+                            )
+                        },
+                    )
+                )
+                events.put(
+                    (
+                        "final",
+                        {
+                            "task_id": execution.task_id,
+                            "status": TaskStatus.FAILED.value,
+                            "error": "需要补充数据库库名",
+                        },
+                    )
+                )
+                return
             if execution.status == TaskStatus.COMPLETED and execution.result is not None:
-                report_text = _render_report_text(execution.result.get("report"))
+                report = execution.result.get("report")
+                ambiguous_tables = _ambiguous_table_names_from_report(report)
+                if ambiguous_tables:
+                    events.put(
+                        (
+                            "markdown",
+                            {
+                                "text": SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
+                                    tables=", ".join(ambiguous_tables),
+                                )
+                            },
+                        )
+                    )
+                    events.put(
+                        (
+                            "final",
+                            {
+                                "task_id": execution.task_id,
+                                "status": TaskStatus.FAILED.value,
+                                "error": "需要补充数据库库名",
+                            },
+                        )
+                    )
+                    return
+                report_text = _render_report_text(report)
                 for chunk in _iter_markdown_chunks(report_text):
                     events.put(("markdown", {"text": chunk}))
             events.put(("final", _build_final_event(execution)))

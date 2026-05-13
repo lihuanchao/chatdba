@@ -97,6 +97,104 @@ class FailedTaskService:
         )
 
 
+class AmbiguousTableTaskService:
+    def __init__(self):
+        self.calls = []
+
+    def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+        self.calls.append(raw_sql)
+        if "shop.orders" in raw_sql:
+            return OptimizationTaskExecution(
+                task_id=f"task-{len(self.calls)}",
+                status=TaskStatus.COMPLETED,
+                result={
+                    "report": OptimizationReport.model_validate(
+                        {
+                            "task_id": f"task-{len(self.calls)}",
+                            "summary": "Use an index.",
+                            "confidence": 0.9,
+                            "confidence_label": "high",
+                            "evidence_status": "full",
+                            "missing_evidence": [],
+                            "limitations": [],
+                            "bottlenecks": [],
+                            "sql_rewrites": [],
+                            "index_recommendations": [],
+                            "risks": [],
+                            "validation_steps": [],
+                            "similar_cases": [],
+                        }
+                    )
+                },
+            )
+        return OptimizationTaskExecution(
+            task_id=f"task-{len(self.calls)}",
+            status=TaskStatus.COMPLETED,
+            result={
+                "report": OptimizationReport.model_validate(
+                    {
+                        "task_id": f"task-{len(self.calls)}",
+                        "summary": "当前为 SQL-only 分析。",
+                        "confidence": 0.35,
+                        "confidence_label": "low",
+                        "evidence_status": "sql_only",
+                        "missing_evidence": [
+                            "route_info",
+                            "explain_json",
+                            "create_table",
+                        ],
+                        "limitations": [
+                            "以下表名在元数据库中存在重复，请补充库名后重试：orders"
+                        ],
+                        "bottlenecks": [],
+                        "sql_rewrites": [],
+                        "index_recommendations": [],
+                        "risks": [],
+                        "validation_steps": [],
+                        "similar_cases": [],
+                    }
+                )
+            },
+        )
+
+
+class FailedAmbiguousTableTaskService:
+    def __init__(self):
+        self.calls = []
+
+    def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+        self.calls.append(raw_sql)
+        if "shop.orders" in raw_sql:
+            return OptimizationTaskExecution(
+                task_id=f"task-{len(self.calls)}",
+                status=TaskStatus.COMPLETED,
+                result={
+                    "report": OptimizationReport.model_validate(
+                        {
+                            "task_id": f"task-{len(self.calls)}",
+                            "summary": "Use an index.",
+                            "confidence": 0.9,
+                            "confidence_label": "high",
+                            "evidence_status": "full",
+                            "missing_evidence": [],
+                            "limitations": [],
+                            "bottlenecks": [],
+                            "sql_rewrites": [],
+                            "index_recommendations": [],
+                            "risks": [],
+                            "validation_steps": [],
+                            "similar_cases": [],
+                        }
+                    )
+                },
+            )
+        return OptimizationTaskExecution(
+            task_id=f"task-{len(self.calls)}",
+            status=TaskStatus.FAILED,
+            error="以下表名在元数据库中存在重复，请补充库名后重试：orders",
+        )
+
+
 class SuccessfulFaultTaskService:
     def __init__(self):
         self.calls = []
@@ -205,6 +303,66 @@ def test_handler_sends_failure_message_when_task_fails():
     assert responder.messages[-1] == (
         f"{SQL_OPTIMIZATION_FAILED_MESSAGE_PREFIX}collector unavailable"
     )
+
+
+def test_handler_prompts_for_schema_and_skips_sql_only_report_when_table_is_ambiguous():
+    responder = RecordingResponder()
+    service = AmbiguousTableTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    result = handler.handle(make_message("SQL优化 select * from orders"))
+
+    assert result.accepted is False
+    assert result.status == TaskStatus.FAILED
+    assert service.calls == ["select * from orders"]
+    assert "请补充数据库库名后继续分析" in responder.messages[-1]
+    assert "orders" in responder.messages[-1]
+    assert "# SQL优化报告" not in "".join(responder.messages)
+
+
+def test_handler_reuses_previous_sql_when_user_replies_with_schema_name():
+    responder = RecordingResponder()
+    service = AmbiguousTableTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    first = handler.handle(make_message("SQL优化 select * from orders"))
+    second = handler.handle(make_message("shop"))
+
+    assert first.accepted is False
+    assert second.accepted is True
+    assert service.calls == [
+        "select * from orders",
+        "SELECT * FROM shop.orders",
+    ]
+
+
+def test_handler_caches_sql_when_service_stops_for_ambiguous_table():
+    responder = RecordingResponder()
+    service = FailedAmbiguousTableTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    first = handler.handle(make_message("SQL优化 select * from orders"))
+    second = handler.handle(make_message("shop"))
+
+    assert first.accepted is False
+    assert any("请补充数据库库名后继续分析" in text for text in responder.messages)
+    assert second.accepted is True
+    assert service.calls == [
+        "select * from orders",
+        "SELECT * FROM shop.orders",
+    ]
 
 
 def test_fault_handler_runs_diagnosis_and_streams_markdown_report():

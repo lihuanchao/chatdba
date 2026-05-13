@@ -38,7 +38,7 @@ def test_run_sql_optimization_task_invokes_graph_with_collector(monkeypatch):
 def test_run_sql_optimization_task_emits_progress(monkeypatch):
     class FakeGraph:
         def invoke(self, payload):
-            return {"result": "ok", "payload": payload}
+            return {"findings": [], "report": {"summary": "ok"}, "payload": payload}
 
     def fake_build_sql_optimization_graph(*, collector, report_composer=None):
         return FakeGraph()
@@ -56,9 +56,34 @@ def test_run_sql_optimization_task_emits_progress(monkeypatch):
         progress_sink=events.append,
     )
 
-    assert result["result"] == "ok"
+    assert result["report"] == {"summary": "ok"}
     assert events == [
         "正在解析 SQL...\n",
         "已生成诊断结论...\n",
         "已生成优化报告...\n",
     ]
+
+
+def test_run_sql_optimization_task_skips_report_progress_when_graph_stops_early(monkeypatch):
+    class FakeGraph:
+        def invoke(self, payload):
+            return {"evidence": "needs schema"}
+
+    def fake_build_sql_optimization_graph(*, collector, report_composer=None):
+        return FakeGraph()
+
+    monkeypatch.setattr(
+        "chatdba.worker.run_task.build_sql_optimization_graph",
+        fake_build_sql_optimization_graph,
+    )
+
+    events = []
+
+    result = run_sql_optimization_task(
+        {"raw_sql": "select * from orders"},
+        object(),
+        progress_sink=events.append,
+    )
+
+    assert result == {"evidence": "needs schema"}
+    assert events == ["正在解析 SQL...\n"]

@@ -19,12 +19,14 @@ def test_fault_diagnosis_task_service_runs_worker_and_returns_completed_executio
         *,
         top_sql_agent=None,
         metric_agent=None,
+        cmdb_resolver=None,
         qwen_gateway=None,
         progress_sink=None,
     ):
         seen["task_payload"] = task_payload
         seen["top_sql_agent"] = top_sql_agent
         seen["metric_agent"] = metric_agent
+        seen["cmdb_resolver"] = cmdb_resolver
         seen["qwen_gateway"] = qwen_gateway
         if progress_sink:
             progress_sink("正在解析故障信息...\n")
@@ -34,6 +36,7 @@ def test_fault_diagnosis_task_service_runs_worker_and_returns_completed_executio
     service = FaultDiagnosisTaskService(
         top_sql_agent="top-sql-agent",
         metric_agent="metric-agent",
+        cmdb_resolver="cmdb-resolver",
         qwen_gateway="qwen",
         task_runner=fake_runner,
         task_id_factory=lambda: "fault-task-1",
@@ -52,6 +55,7 @@ def test_fault_diagnosis_task_service_runs_worker_and_returns_completed_executio
     assert seen["task_payload"]["input_text"] == "订单系统 CPU 高"
     assert seen["top_sql_agent"] == "top-sql-agent"
     assert seen["metric_agent"] == "metric-agent"
+    assert seen["cmdb_resolver"] == "cmdb-resolver"
     assert seen["qwen_gateway"] == "qwen"
     assert progress == ["正在解析故障信息...\n"]
 

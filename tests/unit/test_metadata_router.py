@@ -152,6 +152,49 @@ def test_router_asks_for_schema_when_unqualified_single_table_is_ambiguous():
     assert "请补充库名" in route.collection_errors[0]
 
 
+def test_router_asks_for_schema_when_unqualified_table_exists_on_multiple_instances():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="shop",
+                table_name="orders",
+                instance_id="mysql-order-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="shop",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="archive",
+                table_name="orders",
+                instance_id="mysql-archive-ro",
+                host="10.0.0.20",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="archive",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    route = router.resolve(
+        [MysqlTableTarget(schema_name=None, table_name="orders")]
+    )
+
+    assert route.status == EvidenceStatus.SQL_ONLY
+    assert route.route is None
+    assert "orders" in route.collection_errors[0]
+    assert "请补充库名" in route.collection_errors[0]
+
+
 def test_router_resolves_schema_qualified_table_when_same_table_name_exists_elsewhere():
     repository = FakeMetadataRouteRepository(
         [
@@ -194,7 +237,7 @@ def test_router_resolves_schema_qualified_table_when_same_table_name_exists_else
     assert route.route.default_schema == "shop"
 
 
-def test_router_resolves_multiple_unqualified_tables_from_one_schema():
+def test_router_asks_for_schema_before_inferring_common_schema_for_duplicate_table():
     repository = FakeMetadataRouteRepository(
         [
             MetadataRouteRow(
@@ -247,9 +290,10 @@ def test_router_resolves_multiple_unqualified_tables_from_one_schema():
         ]
     )
 
-    assert route.status == EvidenceStatus.FULL
-    assert route.route.instance_id == "mysql-main-ro"
-    assert route.route.default_schema == "shop"
+    assert route.status == EvidenceStatus.SQL_ONLY
+    assert route.route is None
+    assert "orders" in route.collection_errors[0]
+    assert "请补充库名" in route.collection_errors[0]
 
 
 def test_router_degrades_when_unqualified_tables_have_no_common_schema():

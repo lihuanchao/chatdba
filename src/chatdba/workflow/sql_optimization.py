@@ -7,6 +7,8 @@ from chatdba.sql.parser import parse_sql_features
 from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.workflow.state import SqlOptimizationState
 
+AMBIGUOUS_TABLE_MARKER = "以下表名在元数据库中存在重复，请补充库名后重试："
+
 
 def build_sql_optimization_graph(
     collector,
@@ -25,6 +27,15 @@ def build_sql_optimization_graph(
         )
         targets = resolver.resolve_tables(sql_features.tables)
         return {"evidence": collector.collect(state["raw_sql"], targets)}
+
+    def route_after_evidence(state: SqlOptimizationState) -> str:
+        evidence = state["evidence"]
+        if any(
+            AMBIGUOUS_TABLE_MARKER in error
+            for error in evidence.collection_errors
+        ):
+            return "end"
+        return "diagnose"
 
     def diagnose(state: SqlOptimizationState) -> SqlOptimizationState:
         explain_json = state["evidence"].explain_json or {}
@@ -48,7 +59,14 @@ def build_sql_optimization_graph(
     graph.add_node("build_report", build_report)
     graph.set_entry_point("parse_sql")
     graph.add_edge("parse_sql", "collect_evidence")
-    graph.add_edge("collect_evidence", "diagnose")
+    graph.add_conditional_edges(
+        "collect_evidence",
+        route_after_evidence,
+        {
+            "diagnose": "diagnose",
+            "end": END,
+        },
+    )
     graph.add_edge("diagnose", "build_report")
     graph.add_edge("build_report", END)
     return graph.compile()

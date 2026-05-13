@@ -7,6 +7,10 @@ from chatdba.dingtalk.progress import StreamingProgressBridge
 from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.responder import DingTalkResponder, DingTalkSendResult
 from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.sql.schema_qualification import (
+    extract_schema_name_reply,
+    qualify_unqualified_tables,
+)
 from chatdba.tasks.service import OptimizationTaskExecution
 from chatdba.worker.run_task import ProgressSink
 
@@ -35,6 +39,12 @@ FAULT_DIAGNOSIS_STARTED_MESSAGE = (
 FAULT_DIAGNOSIS_FAILED_MESSAGE_PREFIX = "数据库故障诊断任务失败："
 REPORT_STREAM_CHUNK_SIZE = 320
 FAULT_DIAGNOSIS_PREFIXES = ("故障诊断", "故障分析", "数据库诊断", "诊断")
+AMBIGUOUS_TABLE_MARKER = "以下表名在元数据库中存在重复，请补充库名后重试："
+SCHEMA_REQUIRED_MESSAGE_TEMPLATE = (
+    "检测到表名在多个数据库或实例中重复，请补充数据库库名后继续分析。\n\n"
+    "重复表名：{tables}\n"
+    "请直接回复库名，例如：`shop`，系统会结合上一条 SQL 继续分析。"
+)
 
 
 class OptimizationTaskServiceProtocol(Protocol):
@@ -68,6 +78,30 @@ class DingTalkHandleResult:
     send_results: list[DingTalkSendResult] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class PendingSqlSchemaRequest:
+    raw_sql: str
+    table_names: list[str]
+
+
+class InMemoryPendingSqlSchemaStore:
+    def __init__(self) -> None:
+        self._requests: dict[str, PendingSqlSchemaRequest] = {}
+
+    def get(self, conversation_id: str) -> PendingSqlSchemaRequest | None:
+        return self._requests.get(conversation_id)
+
+    def put(
+        self,
+        conversation_id: str,
+        request: PendingSqlSchemaRequest,
+    ) -> None:
+        self._requests[conversation_id] = request
+
+    def clear(self, conversation_id: str) -> None:
+        self._requests.pop(conversation_id, None)
+
+
 class DingTalkSqlOptimizationHandler:
     def __init__(
         self,
@@ -75,14 +109,30 @@ class DingTalkSqlOptimizationHandler:
         task_service: OptimizationTaskServiceProtocol,
         responder: DingTalkResponder,
         stream_interval_ms: int,
+        pending_schema_store: InMemoryPendingSqlSchemaStore | None = None,
     ) -> None:
         self._task_service = task_service
         self._responder = responder
         self._stream_interval_ms = stream_interval_ms
+        self._pending_schema_store = (
+            pending_schema_store or InMemoryPendingSqlSchemaStore()
+        )
+
+    def has_pending_schema_request(self, conversation_id: str) -> bool:
+        return self._pending_schema_store.get(conversation_id) is not None
 
     def handle(self, message: DingTalkInboundMessage) -> DingTalkHandleResult:
         send_results: list[DingTalkSendResult] = []
         raw_sql = extract_sql_from_message(message).strip()
+        pending = self._pending_schema_store.get(message.conversation_id)
+        schema_name = extract_schema_name_reply(raw_sql) if pending else None
+        if pending and schema_name:
+            raw_sql = qualify_unqualified_tables(
+                pending.raw_sql,
+                schema_name=schema_name,
+                table_names=pending.table_names,
+            )
+            self._pending_schema_store.clear(message.conversation_id)
 
         if not raw_sql:
             send_results.append(
@@ -137,6 +187,35 @@ class DingTalkSqlOptimizationHandler:
             )
 
         if execution.status == TaskStatus.FAILED:
+            ambiguous_tables = _ambiguous_table_names_from_text(execution.error or "")
+            if ambiguous_tables:
+                self._pending_schema_store.put(
+                    message.conversation_id,
+                    PendingSqlSchemaRequest(
+                        raw_sql=raw_sql,
+                        table_names=ambiguous_tables,
+                    ),
+                )
+                bridge.finish()
+                send_results.extend(bridge.send_results)
+                send_results.append(
+                    self._responder.reply_text(
+                        message,
+                        SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
+                            tables=", ".join(ambiguous_tables),
+                        ),
+                    )
+                )
+                finish_result = self._responder.finish_stream(message, failed=True)
+                if finish_result is not None:
+                    send_results.append(finish_result)
+                return DingTalkHandleResult(
+                    accepted=False,
+                    task_id=execution.task_id,
+                    status=TaskStatus.FAILED,
+                    error="需要补充数据库库名",
+                    send_results=send_results,
+                )
             bridge.finish()
             send_results.extend(bridge.send_results)
             error = execution.error or "未知错误"
@@ -158,6 +237,37 @@ class DingTalkSqlOptimizationHandler:
             )
 
         report = execution.result["report"]
+        ambiguous_tables = _ambiguous_table_names_from_report(report)
+        if ambiguous_tables:
+            self._pending_schema_store.put(
+                message.conversation_id,
+                PendingSqlSchemaRequest(
+                    raw_sql=raw_sql,
+                    table_names=ambiguous_tables,
+                ),
+            )
+            bridge.finish()
+            send_results.extend(bridge.send_results)
+            send_results.append(
+                self._responder.reply_text(
+                    message,
+                    SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
+                        tables=", ".join(ambiguous_tables),
+                    ),
+                )
+            )
+            finish_result = self._responder.finish_stream(message, failed=True)
+            if finish_result is not None:
+                send_results.append(finish_result)
+            return DingTalkHandleResult(
+                accepted=False,
+                task_id=execution.task_id,
+                status=TaskStatus.FAILED,
+                error="需要补充数据库库名",
+                send_results=send_results,
+            )
+
+        self._pending_schema_store.clear(message.conversation_id)
         markdown_report = render_report_for_dingtalk(report)
         for chunk in _iter_markdown_chunks(markdown_report):
             bridge.emit_now(chunk)
@@ -226,6 +336,8 @@ class DingTalkChatDBAHandler:
         self._fault_handler = fault_handler
 
     def handle(self, message: DingTalkInboundMessage) -> DingTalkHandleResult:
+        if self._sql_handler.has_pending_schema_request(message.conversation_id):
+            return self._sql_handler.handle(message)
         if is_fault_diagnosis_message(message.text):
             return self._fault_handler.handle(message)
         if is_sql_optimization_message(message):
@@ -364,3 +476,26 @@ def _iter_markdown_chunks(markdown: str) -> list[str]:
     if current:
         chunks.append(current)
     return chunks
+
+
+def _ambiguous_table_names_from_report(report: object) -> list[str]:
+    texts: list[str] = []
+    for field_name in ("limitations", "collection_errors"):
+        value = getattr(report, field_name, None)
+        if isinstance(value, list):
+            texts.extend(str(item) for item in value)
+    return _ambiguous_table_names_from_text("\n".join(texts))
+
+
+def _ambiguous_table_names_from_text(text: str) -> list[str]:
+    table_names: list[str] = []
+    if AMBIGUOUS_TABLE_MARKER not in text:
+        return table_names
+
+    for part in text.split(AMBIGUOUS_TABLE_MARKER)[1:]:
+        names_text = part.splitlines()[0]
+        for name in re.split(r"[,，、\s]+", names_text.strip()):
+            cleaned = name.strip("。.;； ")
+            if cleaned and cleaned not in table_names:
+                table_names.append(cleaned)
+    return table_names

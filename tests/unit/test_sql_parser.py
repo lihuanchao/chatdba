@@ -1,4 +1,5 @@
 from chatdba.sql.parser import parse_sql_features
+from chatdba.sql.schema_qualification import qualify_unqualified_tables
 
 
 def test_parse_sql_features_extracts_tables_and_limit():
@@ -26,3 +27,21 @@ def test_parse_sql_features_preserves_schema_qualified_table_names():
 
     assert features.tables[0].schema_name == "shop"
     assert features.tables[0].table_name == "orders"
+
+
+def test_qualify_unqualified_tables_adds_schema_to_requested_tables_only():
+    sql = (
+        "select * from orders o join shop.users u on o.user_id = u.id "
+        "join products p on p.id = o.product_id"
+    )
+
+    qualified = qualify_unqualified_tables(
+        sql,
+        schema_name="crm",
+        table_names=["orders"],
+    )
+
+    assert qualified == (
+        "SELECT * FROM crm.orders AS o JOIN shop.users AS u ON o.user_id = u.id "
+        "JOIN products AS p ON p.id = o.product_id"
+    )

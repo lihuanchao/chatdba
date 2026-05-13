@@ -256,26 +256,15 @@ class MetadataRouter:
         tables: list[MysqlTableTarget],
         candidates: dict[int, list[MetadataRouteRow]],
     ) -> list[str]:
-        unqualified_indexes = [
-            index for index, table in enumerate(tables) if not table.schema_name
-        ]
-        if not unqualified_indexes:
-            return []
-
-        common_schemas = set(
-            row.schema_name for row in candidates[unqualified_indexes[0]]
-        )
-        for index in unqualified_indexes[1:]:
-            common_schemas &= {
-                row.schema_name for row in candidates[index]
-            }
-        if len(common_schemas) == 1:
-            return []
-
         ambiguous: list[str] = []
-        for index in unqualified_indexes:
-            schemas = {row.schema_name for row in candidates[index]}
-            if len(schemas) > 1:
+        for index, table in enumerate(tables):
+            if table.schema_name:
+                continue
+            route_keys = {
+                (row.instance_id, row.schema_name)
+                for row in candidates[index]
+            }
+            if len(route_keys) > 1:
                 ambiguous.append(tables[index].table_name)
         return ambiguous
 

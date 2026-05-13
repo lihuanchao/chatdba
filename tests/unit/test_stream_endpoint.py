@@ -105,6 +105,32 @@ def test_v1_stream_degrades_task_service_init_failure_to_report(monkeypatch):
     assert "event: end" in response.text
 
 
+def test_v1_stream_prompts_for_schema_when_unqualified_table_is_ambiguous(monkeypatch):
+    class AmbiguousTableTaskService:
+        def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+            return OptimizationTaskExecution(
+                task_id="task-ambiguous",
+                status=TaskStatus.FAILED,
+                error="以下表名在元数据库中存在重复，请补充库名后重试：orders",
+            )
+
+    monkeypatch.setattr(
+        "chatdba.app.main._build_task_service",
+        lambda: AmbiguousTableTaskService(),
+    )
+    client = TestClient(create_app())
+
+    response = client.post("/v1/stream", json={"input": "select * from orders;"})
+
+    assert response.status_code == 200
+    assert "event: markdown" in response.text
+    assert "请补充数据库库名后继续分析" in response.text
+    assert "orders" in response.text
+    assert "# SQL优化报告" not in response.text
+    assert "需要补充数据库库名" in response.text
+    assert "event: end" in response.text
+
+
 def test_v1_stream_degrades_payload_extraction_failure_to_sse(monkeypatch):
     def broken_extract(payload):
         raise RuntimeError("bad graph payload")

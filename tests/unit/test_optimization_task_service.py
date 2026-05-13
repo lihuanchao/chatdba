@@ -1,4 +1,5 @@
 from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.domain.models import EvidenceEnvelope, EvidenceStatus
 from chatdba.tasks.service import OptimizationTaskService
 
 
@@ -250,3 +251,35 @@ def test_task_service_persists_agent_token_usage_records():
     assert len(repository.token_usages) == 1
     assert repository.token_usages[0].task_id == "task-usage"
     assert repository.token_usages[0].total_tokens == 150
+
+
+def test_task_service_returns_failed_execution_when_schema_name_is_required():
+    def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
+        return {
+            "evidence": EvidenceEnvelope(
+                status=EvidenceStatus.SQL_ONLY,
+                missing_evidence=["route_info", "explain_json", "create_table"],
+                collection_errors=["以下表名在元数据库中存在重复，请补充库名后重试：orders"],
+            )
+        }
+
+    repository = RecordingTaskRepository()
+    service = OptimizationTaskService(
+        collector=object(),
+        task_runner=fake_runner,
+        task_repository=repository,
+        task_id_factory=lambda: "task-schema",
+    )
+
+    execution = service.run_sql(
+        raw_sql="select * from orders",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.FAILED
+    assert execution.result is not None
+    assert "请补充库名" in execution.error
+    assert [event.status for event in repository.events] == [
+        TaskStatus.RECEIVED,
+        TaskStatus.FAILED,
+    ]
