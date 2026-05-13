@@ -63,7 +63,7 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
             if "SQL问题画像" in system_prompt:
                 return EMPTY_PROBLEM_PROFILE_JSON
             assert "SQL优化报告" in system_prompt
-            assert "结论摘要（`summary`）只允许输出命中的 SQL 重写规则" in system_prompt
+            assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in system_prompt
             assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in system_prompt
             assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in system_prompt
             assert "filesort fixed" in user_prompt
@@ -115,10 +115,7 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
         findings=[],
     )
 
-    assert "rule01. 投影下推" in report.summary
-    assert "rule07. 聚合、排序下推" in report.summary
-    assert "rule12. 使用 LIMIT 限制数据量" in report.summary
-    assert "Use an index to avoid filesort." not in report.summary
+    assert report.summary == "Use an index to avoid filesort."
     assert report.similar_cases[0].case_id == "case-1"
 
 
@@ -298,7 +295,7 @@ def test_report_builder_selects_cases_by_environment_plan_and_root_cause():
     )
 
 
-def test_report_builder_fallback_summary_lists_only_matched_prompt_rules():
+def test_report_builder_fallback_summary_references_plan_or_ddl_evidence():
     composer = OptimizationReportComposer(
         cases=[
             OptimizationCase(
@@ -349,40 +346,7 @@ def test_report_builder_fallback_summary_lists_only_matched_prompt_rules():
         ],
     )
 
-    assert "rule01. 投影下推" in report.summary
-    assert "rule04. 索引优化" in report.summary
-    assert "filesort" not in report.summary.lower()
-    assert "执行计划" not in report.summary
-
-
-def test_report_builder_summary_matches_rule01_only_for_select_star():
-    composer = OptimizationReportComposer(cases=[])
-
-    select_star_report = composer.compose(
-        task_id="task-select-star",
-        raw_sql="select * from orders",
-        sql_features=SqlFeatures(
-            fingerprint="fp-select-star",
-            statement_type="select",
-            tables=[TableReference(table_name="orders")],
-        ),
-        evidence=EvidenceEnvelope(status=EvidenceStatus.SQL_ONLY),
-        findings=[],
-    )
-    aggregate_report = composer.compose(
-        task_id="task-count-star",
-        raw_sql="select count(*) from orders",
-        sql_features=SqlFeatures(
-            fingerprint="fp-count-star",
-            statement_type="select",
-            tables=[TableReference(table_name="orders")],
-        ),
-        evidence=EvidenceEnvelope(status=EvidenceStatus.SQL_ONLY),
-        findings=[],
-    )
-
-    assert "rule01. 投影下推" in select_star_report.summary
-    assert aggregate_report.summary == "无匹配规则"
+    assert "filesort" in report.summary.lower() or "执行计划" in report.summary
 
 
 def test_report_builder_loads_markdown_system_prompt_file():
@@ -390,7 +354,7 @@ def test_report_builder_loads_markdown_system_prompt_file():
 
     assert "# ChatDBA SQL优化报告生成提示词（中文）" in prompt
     assert "仅返回合法 JSON" in prompt
-    assert "结论摘要（`summary`）只允许输出命中的 SQL 重写规则" in prompt
+    assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in prompt
     assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in prompt
     assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in prompt
 

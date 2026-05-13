@@ -3,9 +3,6 @@ import re
 from pathlib import Path
 from typing import Protocol
 
-import sqlglot
-from sqlglot import expressions as exp
-
 from chatdba.cases.repository import OptimizationCase
 from chatdba.cases.retriever import (
     CaseRetrievalQuery,
@@ -146,12 +143,6 @@ class OptimizationReportComposer:
         try:
             payload = self._qwen_gateway.generate_report(system_prompt, user_prompt)
             report = OptimizationReport.model_validate(json.loads(payload))
-            report.summary = _matched_rule_summary(
-                raw_sql=raw_sql,
-                sql_features=sql_features,
-                evidence=evidence,
-                findings=findings,
-            )
             if not report.similar_cases and similar_cases:
                 report.similar_cases = similar_cases_for_report(
                     similar_cases,
@@ -189,10 +180,9 @@ class OptimizationReportComposer:
         self._record_case_retrieval_debug(case_query, selected_cases)
         similar_cases = similar_cases_for_report(selected_cases, case_query)
         summary = self._build_summary(
-            raw_sql=raw_sql,
-            sql_features=sql_features,
             findings=findings,
             evidence=evidence,
+            similar_cases=similar_cases,
         )
         sql_rewrites = self._build_sql_rewrites(raw_sql, findings)
         index_recommendations = self._build_index_recommendations(sql_features, findings)
@@ -320,17 +310,26 @@ class OptimizationReportComposer:
     def _build_summary(
         self,
         *,
-        raw_sql: str,
-        sql_features: SqlFeatures,
         findings: list[RuleFinding],
         evidence: EvidenceEnvelope,
+        similar_cases,
     ) -> str:
-        return _matched_rule_summary(
-            raw_sql=raw_sql,
-            sql_features=sql_features,
-            evidence=evidence,
-            findings=findings,
-        )
+        status = evidence.status
+        explain_text = json.dumps(evidence.explain_json or {}, ensure_ascii=False).lower()
+        has_filesort = "filesort" in explain_text
+        has_ddl = bool(evidence.create_tables)
+        has_case = bool(similar_cases)
+        if findings:
+            if has_filesort:
+                return "执行计划显示存在 filesort，结合规则判断当前 ORDER BY/LIMIT 需要更匹配的索引或重写。"
+            if has_ddl and has_case:
+                return "结合表结构与关联案例，当前 SQL 的主要问题已具备明确证据支撑，建议优先处理索引与写法匹配。"
+            return findings[0].message
+        if status == EvidenceStatus.SQL_ONLY:
+            return "当前为 SQL-only 分析：基于 SQL 文本、规则与历史案例给出优化建议。"
+        if status == EvidenceStatus.PARTIAL:
+            return "当前为部分证据分析：结合已采集证据与 SQL 规则给出优化建议。"
+        return "当前为完整证据分析：基于执行计划、表结构与 SQL 规则生成建议。"
 
     def _build_sql_rewrites(
         self,
@@ -492,240 +491,6 @@ def _rewrite_select_star(sql: str) -> str:
         flags=re.IGNORECASE,
     )
     return rewritten if rewritten else sql
-
-
-RULE_SUMMARY_TEXT: dict[str, str] = {
-    "rule01": (
-        "**rule01. 投影下推（Projection Pushdown）**\n"
-        "仅返回外部查询中实际需要的列，减少不必要的数据传递，仅 SELECT * 时命中该规则。"
-    ),
-    "rule02": (
-        "**rule02. 选择条件下推（Selection Pushdown）**\n"
-        "将 WHERE 条件尽量下推到子查询或表的级别，过滤掉不必要的数据。"
-    ),
-    "rule03": (
-        "**rule03. 连接条件优化（Join Optimization）**\n"
-        "减少连接的数据量或提高连接顺序的效率。"
-    ),
-    "rule04": (
-        "**rule04. 索引优化（Index Optimization）**\n"
-        "确保列上有适合的索引，提高数据访问速度。"
-    ),
-    "rule06": (
-        "**rule06. EXISTS 与 IN 优化（Subquery Optimization）**\n"
-        "根据场景选用 EXISTS 或 IN，避免子查询返回大量数据影响效率。"
-    ),
-    "rule07": (
-        "**rule07. 聚合、排序下推（Aggregation and Sorting Pushdown）**\n"
-        "在子查询中提前聚合或排序，减少 GROUP BY、ORDER BY 的行数处理。"
-    ),
-    "rule08": (
-        "**rule08. 避免函数操作列（Avoid Functions on Columns）**\n"
-        "在 WHERE 条件中避免对列使用函数，否则会阻止索引发挥作用。"
-    ),
-    "rule09": (
-        "**rule09. 分组优化（GROUP BY Optimization）**\n"
-        "优化分组操作，提前减少无关数据或者替换复杂计算。"
-    ),
-    "rule10": (
-        "**rule10. 重复或太复杂的子查询优化（Subquery Deduplication）**\n"
-        "对重复出现的子查询进行合并，或分解为更高效的查询。"
-    ),
-    "rule11": (
-        "**rule11. 避免使用 ORDER BY RAND()**\n"
-        "ORDER BY RAND() 会对全表的每行调用随机函数，容易造成严重性能问题。"
-    ),
-    "rule12": (
-        "**rule12. 使用 LIMIT 限制数据量**\n"
-        "避免对全表操作，适当地限制返回的行数。"
-    ),
-    "rule13": (
-        "**rule13. 避免多表嵌套和太复杂的嵌套查询**\n"
-        "尽量简化联表操作逻辑，避免深度嵌套。"
-    ),
-    "rule15": (
-        "**rule15. 索引列上的运算导致索引失效**\n"
-        "索引列上的运算会导致索引失效，应尽量将索引列上的运算转换到常量端。"
-    ),
-    "rule16": (
-        "**rule16. 隐式类型转换导致索引失效**\n"
-        "查询条件中的数据类型和表列数据类型不一致时，可能发生隐式类型转换并导致索引失效。"
-    ),
-    "rule17": (
-        "**rule17. IN子查询重写优化**\n"
-        "IN 子查询可在满足条件时改写为等价的 EXISTS 子查询或内关联。"
-    ),
-}
-
-
-def _matched_rule_summary(
-    *,
-    raw_sql: str,
-    sql_features: SqlFeatures,
-    evidence: EvidenceEnvelope,
-    findings: list[RuleFinding],
-) -> str:
-    rules = _matched_rule_ids(
-        raw_sql=raw_sql,
-        sql_features=sql_features,
-        evidence=evidence,
-        findings=findings,
-    )
-    if not rules:
-        return "无匹配规则"
-    return "\n\n".join(RULE_SUMMARY_TEXT[rule] for rule in rules)
-
-
-def _matched_rule_ids(
-    *,
-    raw_sql: str,
-    sql_features: SqlFeatures,
-    evidence: EvidenceEnvelope,
-    findings: list[RuleFinding],
-) -> list[str]:
-    expression = _parse_sql_expression(raw_sql)
-    candidates: list[str] = []
-    finding_codes = {finding.code for finding in findings}
-    explain_text = json.dumps(evidence.explain_json or {}, ensure_ascii=False).lower()
-
-    if expression is not None and _outer_select_has_star_projection(expression):
-        candidates.append("rule01")
-    if expression is not None and _has_subquery_with_outer_where(expression):
-        candidates.append("rule02")
-    if sql_features.joins or (expression is not None and _has_join_without_on(expression)):
-        candidates.append("rule03")
-    if (
-        finding_codes & {"limit_with_order_by", "full_table_scan"}
-        or "filesort" in explain_text
-    ):
-        candidates.append("rule04")
-    if expression is not None and _has_exists_or_in_subquery(expression):
-        candidates.append("rule06")
-    if sql_features.group_by or sql_features.order_by:
-        candidates.append("rule07")
-    if expression is not None and _has_function_wrapped_where_column(expression):
-        candidates.append("rule08")
-    if sql_features.group_by:
-        candidates.append("rule09")
-    if expression is not None and _has_multiple_subqueries(expression):
-        candidates.append("rule10")
-    if expression is not None and _has_order_by_rand(expression):
-        candidates.append("rule11")
-    if sql_features.has_limit:
-        candidates.append("rule12")
-    if expression is not None and _has_nested_subquery(expression):
-        candidates.append("rule13")
-    if expression is not None and _has_arithmetic_on_where_column(expression):
-        candidates.append("rule15")
-    if finding_codes & {"implicit_cast"}:
-        candidates.append("rule16")
-    if expression is not None and _has_in_subquery(expression):
-        candidates.append("rule17")
-
-    return _ordered_unique(candidates)
-
-
-def _parse_sql_expression(raw_sql: str) -> exp.Expression | None:
-    try:
-        return sqlglot.parse_one(raw_sql, read="mysql")
-    except Exception:
-        return None
-
-
-def _outer_select_has_star_projection(expression: exp.Expression) -> bool:
-    select = _outer_select(expression)
-    if select is None:
-        return False
-    return any(_projection_is_star(projection) for projection in select.expressions)
-
-
-def _outer_select(expression: exp.Expression) -> exp.Select | None:
-    if isinstance(expression, exp.Select):
-        return expression
-    if isinstance(expression, exp.Union):
-        left = expression.this
-        return left if isinstance(left, exp.Select) else None
-    return expression.find(exp.Select)
-
-
-def _projection_is_star(projection: exp.Expression) -> bool:
-    if isinstance(projection, exp.Star):
-        return True
-    return isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)
-
-
-def _has_subquery_with_outer_where(expression: exp.Expression) -> bool:
-    outer = _outer_select(expression)
-    return bool(outer and outer.args.get("where") and list(expression.find_all(exp.Subquery)))
-
-
-def _has_join_without_on(expression: exp.Expression) -> bool:
-    return any(
-        not join.args.get("on")
-        for join in expression.find_all(exp.Join)
-    )
-
-
-def _has_exists_or_in_subquery(expression: exp.Expression) -> bool:
-    return any(expression.find_all(exp.Exists)) or _has_in_subquery(expression)
-
-
-def _has_in_subquery(expression: exp.Expression) -> bool:
-    return any(in_expr.args.get("query") is not None for in_expr in expression.find_all(exp.In))
-
-
-def _has_multiple_subqueries(expression: exp.Expression) -> bool:
-    return len(list(expression.find_all(exp.Subquery))) > 1
-
-
-def _has_nested_subquery(expression: exp.Expression) -> bool:
-    for subquery in expression.find_all(exp.Subquery):
-        inner = subquery.this
-        if inner is not None and any(inner.find_all(exp.Subquery)):
-            return True
-    return False
-
-
-def _has_order_by_rand(expression: exp.Expression) -> bool:
-    order = expression.find(exp.Order)
-    return bool(order and list(order.find_all(exp.Rand)))
-
-
-def _has_function_wrapped_where_column(expression: exp.Expression) -> bool:
-    where = expression.find(exp.Where)
-    if where is None:
-        return False
-    for column in where.find_all(exp.Column):
-        node = column.parent
-        while node is not None and not isinstance(node, exp.Where):
-            if isinstance(node, exp.Func):
-                return True
-            node = node.parent
-    return False
-
-
-def _has_arithmetic_on_where_column(expression: exp.Expression) -> bool:
-    where = expression.find(exp.Where)
-    if where is None:
-        return False
-    arithmetic_types = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)
-    for column in where.find_all(exp.Column):
-        node = column.parent
-        while node is not None and not isinstance(node, exp.Where):
-            if isinstance(node, arithmetic_types):
-                return True
-            node = node.parent
-    return False
-
-
-def _ordered_unique(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    unique: list[str] = []
-    for value in values:
-        if value not in seen:
-            seen.add(value)
-            unique.append(value)
-    return unique
 
 
 def _load_system_prompt() -> str:
