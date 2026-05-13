@@ -1,5 +1,8 @@
 from chatdba.sql.parser import parse_sql_features
-from chatdba.sql.schema_qualification import qualify_unqualified_tables
+from chatdba.sql.schema_qualification import (
+    extract_schema_name_reply,
+    qualify_unqualified_tables,
+)
 
 
 def test_parse_sql_features_extracts_tables_and_limit():
@@ -45,3 +48,19 @@ def test_qualify_unqualified_tables_adds_schema_to_requested_tables_only():
         "SELECT * FROM crm.orders AS o JOIN shop.users AS u ON o.user_id = u.id "
         "JOIN products AS p ON p.id = o.product_id"
     )
+
+
+def test_extract_schema_name_reply_allows_hyphenated_schema_names():
+    assert extract_schema_name_reply("international-base") == "international-base"
+    assert extract_schema_name_reply("库名: international-base") == "international-base"
+    assert extract_schema_name_reply("`international-base`") == "international-base"
+
+
+def test_qualify_unqualified_tables_quotes_hyphenated_schema_names():
+    qualified = qualify_unqualified_tables(
+        "select * from orders",
+        schema_name="international-base",
+        table_names=["orders"],
+    )
+
+    assert qualified == "SELECT * FROM `international-base`.orders"

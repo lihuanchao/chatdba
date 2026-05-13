@@ -105,7 +105,7 @@ class AmbiguousTableTaskService:
 
     def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
         self.calls.append(raw_sql)
-        if "shop.orders" in raw_sql:
+        if "shop.orders" in raw_sql or "`international-base`.orders" in raw_sql:
             return OptimizationTaskExecution(
                 task_id=f"task-{len(self.calls)}",
                 status=TaskStatus.COMPLETED,
@@ -381,6 +381,26 @@ def test_handler_reuses_previous_sql_when_user_replies_with_schema_name():
     assert service.calls == [
         "select * from orders",
         "SELECT * FROM shop.orders",
+    ]
+
+
+def test_handler_quotes_hyphenated_schema_name_when_user_replies_with_schema_name():
+    responder = RecordingResponder()
+    service = AmbiguousTableTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    first = handler.handle(make_message("SQL优化 select * from orders"))
+    second = handler.handle(make_message("international-base"))
+
+    assert first.accepted is False
+    assert second.accepted is True
+    assert service.calls == [
+        "select * from orders",
+        "SELECT * FROM `international-base`.orders",
     ]
 
 

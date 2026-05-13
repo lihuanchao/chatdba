@@ -5,7 +5,7 @@ from sqlglot import expressions as exp
 
 
 SCHEMA_REPLY_PATTERN = re.compile(
-    r"^\s*(?:数据库|库名|schema|database)?\s*[:：]?\s*([a-zA-Z0-9_$]+)\s*$",
+    r"^\s*(?:数据库|库名|schema|database)?\s*[:：]?\s*`?([a-zA-Z0-9_$-]+)`?\s*$",
     re.IGNORECASE,
 )
 
