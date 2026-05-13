@@ -163,6 +163,124 @@ def test_card_streaming_sender_updates_single_card_instance():
     assert "msg-1" not in sender._states
 
 
+def test_card_streaming_sender_preserves_custom_template_content_on_failed_finish():
+    class FakeChatbotMessage:
+        @classmethod
+        def from_dict(cls, data):
+            return SimpleNamespace(data=data)
+
+    class FakeCardInstance:
+        def __init__(self, dingtalk_client, incoming_message):
+            self.card_instance_id = "card-schema"
+            self.stream_calls = []
+
+        def set_title_and_logo(self, title, logo):
+            return None
+
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
+            return "card-schema"
+
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+
+    sender = DingTalkCardStreamingSender(
+        dingtalk_client=object(),
+        chatbot_message_cls=FakeChatbotMessage,
+        card_instance_cls=FakeCardInstance,
+        default_card_template_id="env-template",
+    )
+    message = DingTalkInboundMessage(
+        message_id="msg-schema",
+        conversation_id="conv-1",
+        sender_id="user-1",
+        text="SQL优化 select * from orders",
+        session_webhook="https://example.test/webhook",
+        callback_data={"msgId": "msg-schema", "conversationId": "conv-1"},
+    )
+
+    sender.send_markdown_chunk(message=message, text="请补充数据库库名")
+    state = sender._states["msg-schema"]
+    sender.finish_markdown_stream(message=message, failed=True)
+
+    assert state.card_instance.stream_calls[-1] == (
+        "card-schema",
+        "content",
+        "请补充数据库库名",
+        False,
+        True,
+        False,
+    )
+
+
+def test_card_streaming_sender_separates_custom_template_chunks_with_paragraph_break():
+    class FakeChatbotMessage:
+        @classmethod
+        def from_dict(cls, data):
+            return SimpleNamespace(data=data)
+
+    class FakeCardInstance:
+        def __init__(self, dingtalk_client, incoming_message):
+            self.card_instance_id = "card-progress"
+            self.stream_calls = []
+
+        def set_title_and_logo(self, title, logo):
+            return None
+
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
+            return "card-progress"
+
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+
+    sender = DingTalkCardStreamingSender(
+        dingtalk_client=object(),
+        chatbot_message_cls=FakeChatbotMessage,
+        card_instance_cls=FakeCardInstance,
+        default_card_template_id="env-template",
+    )
+    message = DingTalkInboundMessage(
+        message_id="msg-progress",
+        conversation_id="conv-1",
+        sender_id="user-1",
+        text="SQL优化 select * from orders",
+        session_webhook="https://example.test/webhook",
+        callback_data={"msgId": "msg-progress", "conversationId": "conv-1"},
+    )
+
+    sender.send_markdown_chunk(message=message, text="已生成诊断结论...\n")
+    sender.send_markdown_chunk(message=message, text="已生成优化报告...\n")
+
+    state = sender._states["msg-progress"]
+    assert state.card_instance.stream_calls[-1] == (
+        "card-progress",
+        "content",
+        "已生成诊断结论...\n\n已生成优化报告...\n",
+        False,
+        False,
+        False,
+    )
+
+
 def test_card_streaming_sender_falls_back_to_session_webhook_when_no_callback_data():
     seen = {}
 

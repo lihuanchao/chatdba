@@ -20,6 +20,7 @@ from chatdba.dingtalk.handler import (
     SCHEMA_REQUIRED_MESSAGE_TEMPLATE,
     _ambiguous_table_names_from_text,
     _ambiguous_table_names_from_report,
+    _table_names_for_pending_schema,
     extract_fault_diagnosis_text,
     is_fault_diagnosis_message,
     is_sql_optimization_message,
@@ -370,12 +371,13 @@ def _stream_events_for_sql(
             )
             ambiguous_tables = _ambiguous_table_names_from_text(execution.error or "")
             if ambiguous_tables:
+                table_names = _table_names_for_pending_schema(raw_sql, ambiguous_tables)
                 events.put(
                     (
                         "markdown",
                         {
                             "text": SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
-                                tables=", ".join(ambiguous_tables),
+                                tables=", ".join(table_names),
                             )
                         },
                     )
@@ -395,12 +397,16 @@ def _stream_events_for_sql(
                 report = execution.result.get("report")
                 ambiguous_tables = _ambiguous_table_names_from_report(report)
                 if ambiguous_tables:
+                    table_names = _table_names_for_pending_schema(
+                        raw_sql,
+                        ambiguous_tables,
+                    )
                     events.put(
                         (
                             "markdown",
                             {
                                 "text": SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
-                                    tables=", ".join(ambiguous_tables),
+                                    tables=", ".join(table_names),
                                 )
                             },
                         )

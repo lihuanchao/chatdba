@@ -32,3 +32,13 @@ def qualify_unqualified_tables(
             continue
         table.set("db", exp.to_identifier(schema_name))
     return expression.sql(dialect="mysql")
+
+
+def unqualified_table_names(raw_sql: str) -> list[str]:
+    expression = sqlglot.parse_one(raw_sql, read="mysql")
+    names: list[str] = []
+    for table in expression.find_all(exp.Table):
+        if table.db or table.name in names:
+            continue
+        names.append(table.name)
+    return names

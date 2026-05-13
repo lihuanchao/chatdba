@@ -1,13 +1,12 @@
 from langgraph.graph import END, StateGraph
 
 from chatdba.db.metadata_repository import StaticMetadataRepository
+from chatdba.db.route_errors import is_route_resolution_blocker
 from chatdba.explain.mysql_json import extract_plan_features
 from chatdba.rules.mysql_rules import run_mysql_rules
 from chatdba.sql.parser import parse_sql_features
 from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.workflow.state import SqlOptimizationState
-
-AMBIGUOUS_TABLE_MARKER = "以下表名在元数据库中存在重复，请补充库名后重试："
 
 
 def build_sql_optimization_graph(
@@ -31,7 +30,7 @@ def build_sql_optimization_graph(
     def route_after_evidence(state: SqlOptimizationState) -> str:
         evidence = state["evidence"]
         if any(
-            AMBIGUOUS_TABLE_MARKER in error
+            is_route_resolution_blocker(error)
             for error in evidence.collection_errors
         ):
             return "end"

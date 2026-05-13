@@ -7,8 +7,10 @@ from chatdba.dingtalk.progress import StreamingProgressBridge
 from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.responder import DingTalkResponder, DingTalkSendResult
 from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.db.route_errors import AMBIGUOUS_TABLE_MARKER, is_route_resolution_blocker
 from chatdba.sql.schema_qualification import (
     extract_schema_name_reply,
+    unqualified_table_names,
     qualify_unqualified_tables,
 )
 from chatdba.tasks.service import OptimizationTaskExecution
@@ -39,7 +41,6 @@ FAULT_DIAGNOSIS_STARTED_MESSAGE = (
 FAULT_DIAGNOSIS_FAILED_MESSAGE_PREFIX = "数据库故障诊断任务失败："
 REPORT_STREAM_CHUNK_SIZE = 320
 FAULT_DIAGNOSIS_PREFIXES = ("故障诊断", "故障分析", "数据库诊断", "诊断")
-AMBIGUOUS_TABLE_MARKER = "以下表名在元数据库中存在重复，请补充库名后重试："
 SCHEMA_REQUIRED_MESSAGE_TEMPLATE = (
     "检测到表名在多个数据库或实例中重复，请补充数据库库名后继续分析。\n\n"
     "重复表名：{tables}\n"
@@ -189,11 +190,15 @@ class DingTalkSqlOptimizationHandler:
         if execution.status == TaskStatus.FAILED:
             ambiguous_tables = _ambiguous_table_names_from_text(execution.error or "")
             if ambiguous_tables:
+                table_names = _table_names_for_pending_schema(
+                    raw_sql,
+                    ambiguous_tables,
+                )
                 self._pending_schema_store.put(
                     message.conversation_id,
                     PendingSqlSchemaRequest(
                         raw_sql=raw_sql,
-                        table_names=ambiguous_tables,
+                        table_names=table_names,
                     ),
                 )
                 bridge.finish()
@@ -202,11 +207,11 @@ class DingTalkSqlOptimizationHandler:
                     self._responder.reply_text(
                         message,
                         SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
-                            tables=", ".join(ambiguous_tables),
+                            tables=", ".join(table_names),
                         ),
                     )
                 )
-                finish_result = self._responder.finish_stream(message, failed=True)
+                finish_result = self._responder.finish_stream(message, failed=False)
                 if finish_result is not None:
                     send_results.append(finish_result)
                 return DingTalkHandleResult(
@@ -239,11 +244,15 @@ class DingTalkSqlOptimizationHandler:
         report = execution.result["report"]
         ambiguous_tables = _ambiguous_table_names_from_report(report)
         if ambiguous_tables:
+            table_names = _table_names_for_pending_schema(
+                raw_sql,
+                ambiguous_tables,
+            )
             self._pending_schema_store.put(
                 message.conversation_id,
                 PendingSqlSchemaRequest(
                     raw_sql=raw_sql,
-                    table_names=ambiguous_tables,
+                    table_names=table_names,
                 ),
             )
             bridge.finish()
@@ -252,11 +261,11 @@ class DingTalkSqlOptimizationHandler:
                 self._responder.reply_text(
                     message,
                     SCHEMA_REQUIRED_MESSAGE_TEMPLATE.format(
-                        tables=", ".join(ambiguous_tables),
+                        tables=", ".join(table_names),
                     ),
                 )
             )
-            finish_result = self._responder.finish_stream(message, failed=True)
+            finish_result = self._responder.finish_stream(message, failed=False)
             if finish_result is not None:
                 send_results.append(finish_result)
             return DingTalkHandleResult(
@@ -489,8 +498,10 @@ def _ambiguous_table_names_from_report(report: object) -> list[str]:
 
 def _ambiguous_table_names_from_text(text: str) -> list[str]:
     table_names: list[str] = []
-    if AMBIGUOUS_TABLE_MARKER not in text:
+    if not is_route_resolution_blocker(text):
         return table_names
+    if AMBIGUOUS_TABLE_MARKER not in text:
+        return ["相关表"]
 
     for part in text.split(AMBIGUOUS_TABLE_MARKER)[1:]:
         names_text = part.splitlines()[0]
@@ -499,3 +510,13 @@ def _ambiguous_table_names_from_text(text: str) -> list[str]:
             if cleaned and cleaned not in table_names:
                 table_names.append(cleaned)
     return table_names
+
+
+def _table_names_for_pending_schema(
+    raw_sql: str,
+    route_error_tables: list[str],
+) -> list[str]:
+    if route_error_tables != ["相关表"]:
+        return route_error_tables
+    names = unqualified_table_names(raw_sql)
+    return names or route_error_tables

@@ -70,7 +70,22 @@ class StreamUpdateBuffer:
             if elapsed_ms < self.interval_ms:
                 return ""
 
-        output = "".join(self.chunks)
+        output = _join_stream_chunks(self.chunks)
         self.chunks.clear()
         self._buffer_started_ms = None
         return output
+
+
+def _join_stream_chunks(chunks: list[str]) -> str:
+    output = ""
+    for chunk in chunks:
+        if (
+            output
+            and output.endswith("\n")
+            and not output.endswith("\n\n")
+            and chunk
+            and not chunk.startswith("\n")
+        ):
+            output += "\n"
+        output += chunk
+    return output

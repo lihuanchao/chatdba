@@ -283,3 +283,31 @@ def test_task_service_returns_failed_execution_when_schema_name_is_required():
         TaskStatus.RECEIVED,
         TaskStatus.FAILED,
     ]
+
+
+def test_task_service_returns_failed_execution_when_route_spans_multiple_instances():
+    def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
+        return {
+            "evidence": EvidenceEnvelope(
+                status=EvidenceStatus.SQL_ONLY,
+                missing_evidence=["route_info", "explain_json", "create_table"],
+                collection_errors=[
+                    "SQL 涉及多个源实例，当前无法路由到单一源库执行证据采集。"
+                ],
+            )
+        }
+
+    service = OptimizationTaskService(
+        collector=object(),
+        task_runner=fake_runner,
+        task_id_factory=lambda: "task-multi-instance",
+    )
+
+    execution = service.run_sql(
+        raw_sql="select * from orders",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.FAILED
+    assert execution.result is not None
+    assert "多个源实例" in execution.error

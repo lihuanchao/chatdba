@@ -10,13 +10,13 @@ from chatdba.domain.models import (
     SqlOptimizationRequest,
     TaskStatus,
 )
+from chatdba.db.route_errors import is_route_resolution_blocker
 from chatdba.tasks.events import ProgressEvent
 from chatdba.tasks.repository import TaskRepository
 from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.worker.run_task import ProgressSink, run_sql_optimization_task
 
 LOGGER = logging.getLogger(__name__)
-AMBIGUOUS_TABLE_MARKER = "以下表名在元数据库中存在重复，请补充库名后重试："
 
 
 class OptimizationTaskRunner(Protocol):
@@ -295,6 +295,6 @@ def _missing_schema_error(result: dict[str, object]) -> str | None:
         return None
     for error in errors:
         text = str(error)
-        if AMBIGUOUS_TABLE_MARKER in text:
+        if is_route_resolution_blocker(text):
             return text
     return None

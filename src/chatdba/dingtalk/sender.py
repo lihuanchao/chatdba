@@ -127,7 +127,10 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
                     content_key,
                 )
 
-            state.rendered_markdown += text
+            state.rendered_markdown = _append_markdown_chunk(
+                state.rendered_markdown,
+                text,
+            )
             if state.template_id:
                 self._stream_custom_template(
                     state=state,
@@ -168,12 +171,13 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
             if state.template_id:
                 final_text = state.rendered_markdown
                 if failed:
-                    final_text = final_text or "SQL 优化任务失败，请查看日志后重试。"
+                    if not final_text:
+                        final_text = "SQL 优化任务失败，请查看日志后重试。"
                     self._stream_custom_template(
                         state=state,
                         content_value=final_text,
-                        finished=False,
-                        failed=True,
+                        finished=True,
+                        failed=False,
                     )
                 else:
                     self._stream_custom_template(
@@ -270,3 +274,27 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
             str(exc) or exc.__class__.__name__,
             exc_info=True,
         )
+
+
+def _append_markdown_chunk(existing: str, chunk: str) -> str:
+    if (
+        _is_progress_status_chunk(existing)
+        and _is_progress_status_chunk(chunk)
+        and
+        existing
+        and existing.endswith("\n")
+        and not existing.endswith("\n\n")
+        and chunk
+        and not chunk.startswith("\n")
+    ):
+        return f"{existing}\n{chunk}"
+    return f"{existing}{chunk}"
+
+
+def _is_progress_status_chunk(text: str) -> bool:
+    normalized = text.strip()
+    return normalized in {
+        "正在解析 SQL...",
+        "已生成诊断结论...",
+        "已生成优化报告...",
+    }

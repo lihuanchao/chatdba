@@ -41,6 +41,20 @@ def test_stream_update_buffer_respects_interval_before_forced_flush():
     assert buffer.flush(force=True) == ""
 
 
+def test_stream_update_buffer_separates_progress_lines_with_markdown_paragraphs():
+    buffer = StreamUpdateBuffer(interval_ms=0, clock_ms=lambda: 0)
+
+    buffer.add("正在解析 SQL...\n")
+    buffer.add("已生成诊断结论...\n")
+    buffer.add("已生成优化报告...\n")
+
+    assert buffer.flush(force=True) == (
+        "正在解析 SQL...\n\n"
+        "已生成诊断结论...\n\n"
+        "已生成优化报告...\n"
+    )
+
+
 def test_extract_template_id_and_clean_text_from_control_line():
     template_id, cleaned = extract_template_id_and_clean_text(
         "模板ID: abc-template\nSQL优化\nselect * from orders;"

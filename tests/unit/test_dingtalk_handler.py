@@ -23,6 +23,7 @@ from chatdba.tasks.service import OptimizationTaskExecution
 class RecordingResponder:
     def __init__(self):
         self.messages = []
+        self.finished = []
 
     def reply_text(self, message, text):
         self.messages.append(text)
@@ -33,6 +34,7 @@ class RecordingResponder:
         )
 
     def finish_stream(self, message, *, failed=False):
+        self.finished.append(failed)
         return None
 
 
@@ -195,6 +197,43 @@ class FailedAmbiguousTableTaskService:
         )
 
 
+class MultiInstanceRouteTaskService:
+    def __init__(self):
+        self.calls = []
+
+    def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+        self.calls.append(raw_sql)
+        if "shop.orders" in raw_sql:
+            return OptimizationTaskExecution(
+                task_id="task-multi-instance-ok",
+                status=TaskStatus.COMPLETED,
+                result={
+                    "report": OptimizationReport.model_validate(
+                        {
+                            "task_id": "task-multi-instance-ok",
+                            "summary": "Use an index.",
+                            "confidence": 0.9,
+                            "confidence_label": "high",
+                            "evidence_status": "full",
+                            "missing_evidence": [],
+                            "limitations": [],
+                            "bottlenecks": [],
+                            "sql_rewrites": [],
+                            "index_recommendations": [],
+                            "risks": [],
+                            "validation_steps": [],
+                            "similar_cases": [],
+                        }
+                    )
+                },
+            )
+        return OptimizationTaskExecution(
+            task_id="task-multi-instance",
+            status=TaskStatus.FAILED,
+            error="SQL 涉及多个源实例，当前无法路由到单一源库执行证据采集。",
+        )
+
+
 class SuccessfulFaultTaskService:
     def __init__(self):
         self.calls = []
@@ -322,6 +361,7 @@ def test_handler_prompts_for_schema_and_skips_sql_only_report_when_table_is_ambi
     assert "请补充数据库库名后继续分析" in responder.messages[-1]
     assert "orders" in responder.messages[-1]
     assert "# SQL优化报告" not in "".join(responder.messages)
+    assert responder.finished[-1] is False
 
 
 def test_handler_reuses_previous_sql_when_user_replies_with_schema_name():
@@ -358,6 +398,46 @@ def test_handler_caches_sql_when_service_stops_for_ambiguous_table():
 
     assert first.accepted is False
     assert any("请补充数据库库名后继续分析" in text for text in responder.messages)
+    assert responder.finished[0] is False
+    assert second.accepted is True
+    assert service.calls == [
+        "select * from orders",
+        "SELECT * FROM shop.orders",
+    ]
+
+
+def test_handler_prompts_for_schema_when_route_spans_multiple_instances():
+    responder = RecordingResponder()
+    service = MultiInstanceRouteTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    result = handler.handle(make_message("SQL优化 select * from orders"))
+
+    assert result.accepted is False
+    assert result.status == TaskStatus.FAILED
+    assert "请补充数据库库名后继续分析" in responder.messages[-1]
+    assert "SQL 优化任务失败" not in responder.messages[-1]
+    assert "# SQL优化报告" not in "".join(responder.messages)
+    assert responder.finished[-1] is False
+
+
+def test_handler_reuses_previous_sql_after_multi_instance_route_prompt():
+    responder = RecordingResponder()
+    service = MultiInstanceRouteTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    first = handler.handle(make_message("SQL优化 select * from orders"))
+    second = handler.handle(make_message("shop"))
+
+    assert first.accepted is False
     assert second.accepted is True
     assert service.calls == [
         "select * from orders",
