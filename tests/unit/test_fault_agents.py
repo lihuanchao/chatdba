@@ -17,6 +17,7 @@ def make_profile() -> FaultDiagnosisProfile:
         management_ip="10.186.17.54",
         business_ip="10.186.17.55",
         primary_ip="10.186.17.54",
+        alert_time="2026-04-30 15:00:00",
         start_time="2026-04-30 14:00:00",
         end_time="2026-04-30 15:00:00",
         query_background="订单系统数据库故障诊断",
@@ -31,14 +32,16 @@ class RecordingMysqlClient:
         self.calls.append((sql, params))
         return [
             {
-                "db": "orders",
-                "running_seconds": 42,
-                "SQL_TEXT": "select * from orders where status = 'PAID'",
+                "数据库名": "orders",
+                "SQL语句摘要": "select * from orders where status = ?",
+                "执行次数": 12,
+                "平均执行时间(秒)": 3.42,
+                "总执行时间(秒)": 41.04,
             }
         ]
 
 
-def test_mysql_top_sql_agent_runs_fixed_performance_schema_query():
+def test_mysql_top_sql_agent_queries_digest_summary_for_alert_window():
     client = RecordingMysqlClient()
     agent = MysqlTopSqlAgent(mysql_client=client, min_running_seconds=10, limit=10)
 
@@ -46,13 +49,16 @@ def test_mysql_top_sql_agent_runs_fixed_performance_schema_query():
 
     assert evidence.status == "success"
     assert evidence.rows[0].database == "orders"
-    assert evidence.rows[0].running_seconds == 42
-    assert evidence.rows[0].sql_text == "select * from orders where status = 'PAID'"
+    assert evidence.rows[0].execution_count == 12
+    assert evidence.rows[0].avg_execution_seconds == 3.42
+    assert evidence.rows[0].total_execution_seconds == 41.04
+    assert evidence.rows[0].sql_text == "select * from orders where status = ?"
     sql, params = client.calls[0]
-    assert "performance_schema.threads" in sql
-    assert "performance_schema.events_statements_current" in sql
-    assert "PROCESSLIST_COMMAND != 'Sleep'" in sql
-    assert params == [10, 10]
+    assert "performance_schema.events_statements_summary_by_digest" in sql
+    assert "LAST_SEEN > %s" in sql
+    assert "LAST_SEEN < %s" in sql
+    assert "ORDER BY AVG_TIMER_WAIT DESC" in sql
+    assert params == ["2026-04-30 14:30:00", "2026-04-30 15:00:00", 10]
 
 
 class RecordingPrometheusClient:

@@ -21,7 +21,9 @@ class FakeTopSqlAgent:
             rows=[
                 TopSqlRecord(
                     database="orders",
-                    running_seconds=38,
+                    execution_count=12,
+                    avg_execution_seconds=3.42,
+                    total_execution_seconds=41.04,
                     sql_text="select * from orders order by created_at desc limit 1000",
                 )
             ],
@@ -54,6 +56,12 @@ class FakeMetricAgent:
 
 class FakeCmdbResolver:
     def resolve_by_management_ip(self, management_ip: str):
+        if management_ip == "10.187.0.54":
+            return {
+                "management_ip": management_ip,
+                "business_ip": "10.187.0.55",
+                "system_name": "ZJ_生产数据库维护",
+            }
         assert management_ip == "10.186.17.54"
         return {
             "management_ip": management_ip,
@@ -102,7 +110,7 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "CPU 使用率持续高于 90%" in report.markdown
 
 
-def test_fault_diagnosis_uses_15_minute_window_around_alert_time():
+def test_fault_diagnosis_uses_30_minute_window_before_alert_time():
     graph = build_fault_diagnosis_graph(
         top_sql_agent=FakeTopSqlAgent(),
         metric_agent=FakeMetricAgent(),
@@ -122,5 +130,37 @@ def test_fault_diagnosis_uses_15_minute_window_around_alert_time():
 
     profile = result["profile"]
 
-    assert profile.start_time == "2026-04-30 14:05:00"
-    assert profile.end_time == "2026-04-30 14:35:00"
+    assert profile.start_time == "2026-04-30 13:50:00"
+    assert profile.end_time == "2026-04-30 14:20:00"
+    assert profile.alert_time == "2026-04-30 14:20:00"
+
+
+def test_fault_diagnosis_extracts_time_and_management_ip_from_real_alert_text():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-3",
+            "input_text": (
+                "【系统:告警文本系统名不可信】2026-05-13 09:45:03 "
+                "实例：10.187.0.54|mysql_server_8801，ip：10.187.0.54，"
+                "指标名称：<数据库主进程是否存在> 发生异常，当前指标值：'0'，"
+                "请及时关注【同心云】"
+            ),
+            "current_time": datetime(2026, 5, 13, 10, 0, 0),
+        }
+    )
+
+    profile = result["profile"]
+
+    assert profile.system_name == "ZJ_生产数据库维护"
+    assert profile.management_ip == "10.187.0.54"
+    assert profile.primary_ip == "10.187.0.54"
+    assert profile.business_ip == "10.187.0.55"
+    assert profile.alert_time == "2026-05-13 09:45:03"
+    assert profile.start_time == "2026-05-13 09:15:03"
+    assert profile.end_time == "2026-05-13 09:45:03"

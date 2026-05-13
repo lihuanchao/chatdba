@@ -228,7 +228,9 @@ class DingTalkChatDBAHandler:
     def handle(self, message: DingTalkInboundMessage) -> DingTalkHandleResult:
         if is_fault_diagnosis_message(message.text):
             return self._fault_handler.handle(message)
-        return self._sql_handler.handle(message)
+        if is_sql_optimization_message(message):
+            return self._sql_handler.handle(message)
+        return self._fault_handler.handle(message)
 
 
 def is_fault_diagnosis_message(text: str) -> bool:
@@ -237,6 +239,11 @@ def is_fault_diagnosis_message(text: str) -> bool:
         normalized.lower().startswith(prefix.lower())
         for prefix in FAULT_DIAGNOSIS_PREFIXES
     )
+
+
+def is_sql_optimization_message(message: DingTalkInboundMessage) -> bool:
+    raw_sql = extract_sql_from_message(message).strip()
+    return bool(re.match(r"(?is)^select\b", raw_sql))
 
 
 def extract_fault_diagnosis_text(text: str) -> str:

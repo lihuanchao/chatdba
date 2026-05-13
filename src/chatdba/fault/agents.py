@@ -19,16 +19,18 @@ from chatdba.domain.fault_diagnosis import (
 
 TOP_SQL_QUERY = """
 SELECT
-    t.PROCESSLIST_DB AS db,
-    t.PROCESSLIST_TIME AS running_seconds,
-    es.SQL_TEXT
-FROM performance_schema.threads t
-JOIN performance_schema.events_statements_current es
-    ON t.THREAD_ID = es.THREAD_ID
-WHERE t.PROCESSLIST_COMMAND != 'Sleep'
-  AND es.SQL_TEXT IS NOT NULL
-  AND t.PROCESSLIST_TIME >= %s
-ORDER BY t.PROCESSLIST_TIME DESC
+    SCHEMA_NAME as `数据库名`,
+    DIGEST_TEXT as `SQL语句摘要`,
+    COUNT_STAR as `执行次数`,
+    ROUND(AVG_TIMER_WAIT/1000000000000, 4) as `平均执行时间(秒)`,
+    ROUND(SUM_TIMER_WAIT/1000000000000, 4) as `总执行时间(秒)`
+FROM performance_schema.events_statements_summary_by_digest
+WHERE SCHEMA_NAME IS NOT NULL
+  AND SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
+  AND DIGEST_TEXT IS NOT NULL
+  AND LAST_SEEN > %s
+  AND LAST_SEEN < %s
+ORDER BY AVG_TIMER_WAIT DESC
 LIMIT %s
 """.strip()
 
@@ -248,9 +250,10 @@ class MysqlTopSqlAgent:
             )
 
         try:
+            ts_min, ts_max = _top_sql_time_bounds(profile)
             rows = self._client_for(profile).query_all(
                 TOP_SQL_QUERY,
-                [self._min_running_seconds, self._limit],
+                [ts_min, ts_max, self._limit],
             )
         except Exception as exc:
             return TopSqlEvidence(
@@ -263,7 +266,7 @@ class MysqlTopSqlAgent:
         return TopSqlEvidence(
             status="success",
             rows=records,
-            summary=f"获取到 {len(records)} 条运行时间超过 {self._min_running_seconds} 秒的 TopSQL。",
+            summary=f"获取到 {len(records)} 条告警前 30 分钟内平均执行时间最高的 TopSQL 摘要。",
         )
 
     def _client_for(self, profile: FaultDiagnosisProfile) -> MysqlQueryClient:
@@ -476,12 +479,31 @@ class PrometheusMetricAgent:
 def _top_sql_record_from_row(row: object) -> TopSqlRecord:
     data = row if isinstance(row, dict) else {}
     return TopSqlRecord(
-        database=_optional_str(data.get("db") or data.get("PROCESSLIST_DB")),
-        running_seconds=_optional_float(
-            data.get("running_seconds") or data.get("PROCESSLIST_TIME")
+        database=_optional_str(
+            data.get("数据库名") or data.get("db") or data.get("SCHEMA_NAME")
         ),
-        sql_text=str(data.get("SQL_TEXT") or data.get("sql_text") or ""),
+        execution_count=_optional_int(data.get("执行次数") or data.get("COUNT_STAR")),
+        avg_execution_seconds=_optional_float(
+            data.get("平均执行时间(秒)") or data.get("avg_execution_seconds")
+        ),
+        total_execution_seconds=_optional_float(
+            data.get("总执行时间(秒)") or data.get("total_execution_seconds")
+        ),
+        sql_text=str(
+            data.get("SQL语句摘要")
+            or data.get("DIGEST_TEXT")
+            or data.get("SQL_TEXT")
+            or data.get("sql_text")
+            or ""
+        ),
     )
+
+
+def _top_sql_time_bounds(profile: FaultDiagnosisProfile) -> tuple[str, str]:
+    end_time = profile.alert_time or profile.end_time
+    ts_max = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+    ts_min = ts_max - timedelta(minutes=30)
+    return _format_mysql_time(ts_min), _format_mysql_time(ts_max)
 
 
 def _metric_series_from_payload(
@@ -578,6 +600,10 @@ def _to_prometheus_utc(value: str) -> str:
     local_time = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
     utc_time = local_time - timedelta(hours=8)
     return utc_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _format_mysql_time(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _optional_str(value: object) -> str | None:
@@ -747,5 +773,14 @@ def _optional_float(value: object) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None

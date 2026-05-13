@@ -197,6 +197,37 @@ def test_v1_stream_routes_fault_diagnosis_prefix_to_fault_service(monkeypatch):
     assert "### 一、问题简述" in response.text
 
 
+def test_v1_stream_routes_unprefixed_alert_to_fault_service(monkeypatch):
+    seen = {}
+
+    class FakeFaultService:
+        def run_diagnosis(self, *, input_text, dingtalk_context, progress_sink=None):
+            seen["input_text"] = input_text
+            report = type("Report", (), {"markdown": "### 一、问题简述\n主进程不存在"})()
+            return OptimizationTaskExecution(
+                task_id="fault-stream-2",
+                status=TaskStatus.COMPLETED,
+                result={"report": report},
+            )
+
+    monkeypatch.setattr(
+        "chatdba.app.main._build_fault_task_service",
+        lambda: FakeFaultService(),
+    )
+    client = TestClient(create_app())
+    alert = (
+        "【系统:ZJ_生产数据库维护】2026-05-13 09:45:03 "
+        "实例：10.187.0.54|mysql_server_8801，ip：10.187.0.54，"
+        "指标名称：<数据库主进程是否存在> 发生异常"
+    )
+
+    response = client.post("/v1/stream", json={"input": alert})
+
+    assert response.status_code == 200
+    assert seen["input_text"] == alert
+    assert "### 一、问题简述" in response.text
+
+
 def test_v1_stream_runtime_loads_cases_from_case_library(monkeypatch):
     monkeypatch.setattr(
         "chatdba.app.main._safe_load_settings",

@@ -157,13 +157,14 @@ def _fallback_profile(
 ) -> FaultDiagnosisProfile:
     now = current_time or datetime.now()
     start_time, end_time = _time_window(input_text, now)
+    alert_time = _extract_alert_time(input_text)
     management_ip = _extract_first_ip(input_text)
     cmdb_record = _resolve_cmdb_record(cmdb_resolver, management_ip)
     business_ip = _cmdb_value(cmdb_record, "business_ip")
     primary_ip = management_ip
-    system_name = _extract_system_name(input_text)
+    system_name = _cmdb_value(cmdb_record, "system_name")
     if not system_name:
-        system_name = _cmdb_value(cmdb_record, "system_name")
+        system_name = _extract_system_name(input_text)
     missing_fields: list[str] = []
     if not (management_ip or system_name):
         missing_fields.append("system_name_or_ip")
@@ -205,6 +206,7 @@ def _fallback_profile(
         management_ip=management_ip,
         business_ip=business_ip,
         primary_ip=primary_ip,
+        alert_time=_format_time(alert_time) if alert_time else None,
         start_time=start_time,
         end_time=end_time,
         query_background=query_background,
@@ -417,11 +419,19 @@ def _metric_markdown(metrics: MetricEvidence) -> str:
 def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
     if top_sql.status != "success" or not top_sql.rows:
         return f"未获取到有效 TopSQL。错误：{top_sql.error_message or 'unknown'}"
-    rows = ["| 数据库 | 运行时长(s) | SQL |", "| --- | ---: | --- |"]
+    rows = [
+        "| 数据库 | 执行次数 | 平均执行时间(s) | 总执行时间(s) | SQL摘要 |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
     for record in top_sql.rows[:10]:
         sql = record.sql_text.replace("\n", " ").strip()
         rows.append(
-            f"| {record.database or ''} | {record.running_seconds or 0:g} | `{sql}` |"
+            "| "
+            f"{record.database or ''} | "
+            f"{record.execution_count or 0} | "
+            f"{record.avg_execution_seconds or 0:g} | "
+            f"{record.total_execution_seconds or 0:g} | "
+            f"`{sql}` |"
         )
     rows.append("")
     rows.append(top_sql.summary or "已获取 TopSQL，请结合执行计划进一步优化。")
@@ -458,8 +468,8 @@ def _time_window(input_text: str, now: datetime) -> tuple[str, str]:
     alert_time = _extract_alert_time(input_text)
     if alert_time is not None:
         return (
-            _format_time(alert_time - timedelta(minutes=15)),
-            _format_time(alert_time + timedelta(minutes=15)),
+            _format_time(alert_time - timedelta(minutes=30)),
+            _format_time(alert_time),
         )
     if re.search(r"近\s*1\s*小时|最近\s*1\s*小时", input_text):
         start = now - timedelta(hours=1)
@@ -494,6 +504,14 @@ def _parse_datetime_text(value: str) -> datetime | None:
 
 
 def _extract_first_ip(text: str) -> str | None:
+    tagged_patterns = [
+        r"(?:管理IP|管理\s*IP|mgmt_ip|mgmt\s*ip|ip|IP)\s*[:：]\s*(?P<ip>(?:\d{1,3}\.){3}\d{1,3})",
+        r"实例\s*[:：]\s*(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?:\|mysql_server_\d+)?",
+    ]
+    for pattern in tagged_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group("ip")
     match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
     return match.group(0) if match else None
 
@@ -527,6 +545,7 @@ def _merge_profile_cmdb_fields(
     management_ip = profile.management_ip or fallback.management_ip or profile.primary_ip
     business_ip = profile.business_ip or fallback.business_ip
     system_name = profile.system_name or fallback.system_name
+    alert_time = profile.alert_time or fallback.alert_time
     missing_fields = list(dict.fromkeys([*profile.missing_fields, *fallback.missing_fields]))
     if management_ip and business_ip and "business_ip" in missing_fields:
         missing_fields.remove("business_ip")
@@ -535,6 +554,7 @@ def _merge_profile_cmdb_fields(
             "management_ip": management_ip,
             "business_ip": business_ip,
             "primary_ip": profile.primary_ip or management_ip,
+            "alert_time": alert_time,
             "system_name": system_name,
             "missing_fields": missing_fields,
         }
@@ -542,6 +562,9 @@ def _merge_profile_cmdb_fields(
 
 
 def _extract_system_name(text: str) -> str | None:
+    match = re.search(r"【系统\s*[:：]\s*(?P<name>[^】]+)】", text)
+    if match:
+        return match.group("name").strip()
     match = re.search(r"系统名称\s*[:：]\s*(?P<name>[^，,\n。]+)", text)
     if match:
         return match.group("name").strip()

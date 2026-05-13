@@ -277,3 +277,33 @@ def test_chatdba_handler_keeps_sql_prefix_on_sql_optimization_handler():
     assert result.task_id == "task-1"
     assert sql_service.calls[0]["raw_sql"] == "select * from orders"
     assert fault_service.calls == []
+
+
+def test_chatdba_handler_routes_unprefixed_alert_to_fault_handler():
+    responder = RecordingResponder()
+    sql_service = SuccessfulTaskService()
+    fault_service = SuccessfulFaultTaskService()
+    handler = DingTalkChatDBAHandler(
+        sql_handler=DingTalkSqlOptimizationHandler(
+            task_service=sql_service,
+            responder=responder,
+            stream_interval_ms=1000,
+        ),
+        fault_handler=DingTalkFaultDiagnosisHandler(
+            task_service=fault_service,
+            responder=responder,
+            stream_interval_ms=1000,
+        ),
+    )
+    alert = (
+        "【系统:ZJ_生产数据库维护】2026-05-13 09:45:03 "
+        "实例：10.187.0.54|mysql_server_8801，ip：10.187.0.54，"
+        "指标名称：<数据库主进程是否存在> 发生异常"
+    )
+
+    result = handler.handle(make_message(alert))
+
+    assert result.accepted is True
+    assert result.task_id == "fault-1"
+    assert sql_service.calls == []
+    assert fault_service.calls[0]["input_text"] == alert

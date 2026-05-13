@@ -16,6 +16,7 @@ class FaultDiagnosisProfile(BaseModel):
     management_ip: str | None = None
     business_ip: str | None = None
     primary_ip: str | None = None
+    alert_time: str | None = None
     start_time: str
     end_time: str
     timezone: str = "Asia/Shanghai"
@@ -27,6 +28,9 @@ class FaultDiagnosisProfile(BaseModel):
 class TopSqlRecord(BaseModel):
     database: str | None = None
     running_seconds: float | None = None
+    execution_count: int | None = None
+    avg_execution_seconds: float | None = None
+    total_execution_seconds: float | None = None
     sql_text: str
 
 

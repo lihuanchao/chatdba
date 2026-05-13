@@ -10,9 +10,11 @@ class FakeCursor:
     def fetchall(self):
         return [
             {
-                "db": "orders",
-                "running_seconds": 21,
-                "SQL_TEXT": "select * from orders",
+                "数据库名": "orders",
+                "SQL语句摘要": "select * from orders",
+                "执行次数": 4,
+                "平均执行时间(秒)": 2.1,
+                "总执行时间(秒)": 8.4,
             }
         ]
 
@@ -85,6 +87,7 @@ def test_build_fault_runtime_wires_mysql_and_prometheus_agents():
         input_text="订单系统 CPU 告警",
         system_name="订单系统",
         primary_ip="10.186.17.54",
+        alert_time="2026-04-30 15:00:00",
         start_time="2026-04-30 14:00:00",
         end_time="2026-04-30 15:00:00",
         query_background="订单系统数据库故障诊断",
@@ -94,6 +97,7 @@ def test_build_fault_runtime_wires_mysql_and_prometheus_agents():
 
     assert evidence.status == "success"
     assert evidence.rows[0].sql_text == "select * from orders"
+    assert evidence.rows[0].execution_count == 4
     assert pymysql_module.connect_kwargs["host"] == "10.186.17.54"
     assert pymysql_module.connect_kwargs["port"] == 8801
     assert pymysql_module.connect_kwargs["database"] == "performance_schema"

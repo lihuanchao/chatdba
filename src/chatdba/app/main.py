@@ -19,6 +19,7 @@ from chatdba.dingtalk.channel import DingTalkInboundMessage, extract_sql_from_me
 from chatdba.dingtalk.handler import (
     extract_fault_diagnosis_text,
     is_fault_diagnosis_message,
+    is_sql_optimization_message,
 )
 from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.runtime import SqlOnlyCollector
@@ -568,6 +569,19 @@ def create_app() -> FastAPI:
                 )
 
             raw_sql = _extract_sql_from_payload(payload)
+            if raw_sql and not is_sql_optimization_message(
+                DingTalkInboundMessage(
+                    message_id="stream-request",
+                    conversation_id="stream-request",
+                    sender_id="stream-request",
+                    text=raw_text,
+                )
+            ):
+                return StreamingResponse(
+                    _stream_events_for_fault(raw_text, fault_service_provider.get),
+                    media_type="text/event-stream",
+                    headers=STREAM_EVENT_HEADERS,
+                )
             if not raw_sql:
                 return StreamingResponse(
                     error_stream("empty_sql", EMPTY_SQL_MESSAGE),

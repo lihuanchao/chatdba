@@ -227,9 +227,17 @@ Fault diagnosis collects three metric series by default:
 - `slow_sql_count`: slow SQL count queried by management IP.
 
 When the alert text contains an explicit alert time such as
-`告警时间：2026-04-30 14:20:00`, fault diagnosis queries the 30-minute window from
-15 minutes before to 15 minutes after that timestamp. If no explicit alert time
-is found, it keeps the existing recent-1-hour fallback.
+`告警时间：2026-04-30 14:20:00`, fault diagnosis queries from 30 minutes before
+that timestamp to the alert time. If no explicit alert time is found, it keeps
+the existing recent-1-hour fallback.
+
+TopSQL uses `performance_schema.events_statements_summary_by_digest` and queries
+the 30-minute window before the alert time:
+
+```text
+ts_min = alert_time - 30 minutes
+ts_max = alert_time
+```
 
 The real Prometheus MCP integration test is opt-in because it hits the configured
 SSE endpoint:
