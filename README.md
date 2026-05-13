@@ -216,6 +216,37 @@ Optional HTTP fallback settings:
 FAULT_PROMETHEUS_BASE_URL=
 FAULT_PROMETHEUS_TIMEOUT_SECONDS=8
 FAULT_METRIC_STEP_SECONDS=60
+FAULT_ACTIVE_THREADS_QUERY_TEMPLATE=ctg_paas_30202624250003{sysCode="database_prod",tenant_id="100011",ip="{management_ip}"}
+FAULT_SLOW_SQL_COUNT_QUERY_TEMPLATE=increase(mysql_global_status_slow_queries{ip="{management_ip}"}[1m])
+```
+
+Fault diagnosis collects three metric series by default:
+
+- `cpu_usage`: CPU usage queried by business IP.
+- `active_threads`: database active thread count queried by management IP.
+- `slow_sql_count`: slow SQL count queried by management IP.
+
+When the alert text contains an explicit alert time such as
+`告警时间：2026-04-30 14:20:00`, fault diagnosis queries the 30-minute window from
+15 minutes before to 15 minutes after that timestamp. If no explicit alert time
+is found, it keeps the existing recent-1-hour fallback.
+
+The real Prometheus MCP integration test is opt-in because it hits the configured
+SSE endpoint:
+
+```bash
+CHATDBA_RUN_PROMETHEUS_MCP_INTEGRATION=1 \
+python -m pytest -q tests/integration/test_prometheus_mcp_server.py
+```
+
+Optional overrides:
+
+```text
+CHATDBA_PROMETHEUS_MCP_SSE_URL=http://10.186.42.51:8080/sse
+CHATDBA_PROMETHEUS_MCP_TEST_QUERY=up
+CHATDBA_PROMETHEUS_MCP_TEST_START=2026-04-30T06:00:00Z
+CHATDBA_PROMETHEUS_MCP_TEST_END=2026-04-30T06:05:00Z
+CHATDBA_PROMETHEUS_MCP_TEST_STEP=60s
 ```
 
 Alert payloads are expected to contain the database management IP. Metric queries

@@ -68,6 +68,7 @@ class RecordingPrometheusClient:
                 "step": step,
             }
         )
+        value = str(91.2 + len(self.calls))
         return {
             "status": "success",
             "data": {
@@ -75,8 +76,8 @@ class RecordingPrometheusClient:
                     {
                         "metric": {"ip": "10.186.17.54"},
                         "values": [
-                            [1777528800, "91.2"],
-                            [1777528860, "93.5"],
+                            [1777528800, value],
+                            [1777528860, value],
                         ],
                     }
                 ]
@@ -91,17 +92,29 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     evidence = agent.analyze(make_profile())
 
     assert evidence.status == "success"
-    assert evidence.metrics[0].metric_name == "cpu_usage"
+    assert [metric.metric_name for metric in evidence.metrics] == [
+        "cpu_usage",
+        "active_threads",
+        "slow_sql_count",
+    ]
+    assert [metric.unit for metric in evidence.metrics] == ["%", "count", "count"]
     assert evidence.metrics[0].ip == "10.186.17.54"
-    assert evidence.metrics[0].unit == "%"
-    assert [point.value for point in evidence.metrics[0].values] == [91.2, 93.5]
+    assert [point.value for point in evidence.metrics[0].values] == [92.2, 92.2]
     assert client.calls[0]["query"] == (
         '100 - (avg by(ip) (rate(node_cpu_seconds_total{mode="idle", '
         'ip="10.186.17.55"}[10m])) * 100)'
     )
+    assert client.calls[1]["query"] == (
+        'ctg_paas_30202624250003{sysCode="database_prod",'
+        'tenant_id="100011",ip="10.186.17.54"}'
+    )
+    assert client.calls[2]["query"] == (
+        'increase(mysql_global_status_slow_queries{ip="10.186.17.54"}[1m])'
+    )
     assert client.calls[0]["start"] == "2026-04-30T06:00:00Z"
     assert client.calls[0]["end"] == "2026-04-30T07:00:00Z"
     assert client.calls[0]["step"] == "60s"
+    assert len(client.calls) == 3
 
 
 class FailingPrometheusClient:
@@ -121,7 +134,7 @@ def test_prometheus_metric_agent_prefers_mcp_when_available():
     evidence = agent.analyze(make_profile())
 
     assert evidence.status == "success"
-    assert len(mcp_client.calls) == 1
+    assert len(mcp_client.calls) == 3
     assert len(http_client.calls) == 0
 
 
@@ -137,7 +150,7 @@ def test_prometheus_metric_agent_falls_back_to_http_when_mcp_fails():
     evidence = agent.analyze(make_profile())
 
     assert evidence.status == "success"
-    assert len(http_client.calls) == 1
+    assert len(http_client.calls) == 3
     assert evidence.metrics[0].metric_name == "cpu_usage"
 
 

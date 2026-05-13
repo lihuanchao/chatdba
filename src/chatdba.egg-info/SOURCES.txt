@@ -38,6 +38,7 @@ src/chatdba/explain/__init__.py
 src/chatdba/explain/mysql_json.py
 src/chatdba/fault/__init__.py
 src/chatdba/fault/agents.py
+src/chatdba/fault/cmdb.py
 src/chatdba/fault/runtime.py
 src/chatdba/models/__init__.py
 src/chatdba/models/qwen_gateway.py

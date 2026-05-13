@@ -32,6 +32,14 @@ ORDER BY t.PROCESSLIST_TIME DESC
 LIMIT %s
 """.strip()
 
+_DEFAULT_ACTIVE_THREADS_QUERY_TEMPLATE = (
+    'ctg_paas_30202624250003{sysCode="database_prod",'
+    'tenant_id="100011",ip="{management_ip}"}'
+)
+_DEFAULT_SLOW_SQL_COUNT_QUERY_TEMPLATE = (
+    'increase(mysql_global_status_slow_queries{ip="{management_ip}"}[1m])'
+)
+
 
 class MysqlQueryClient(Protocol):
     def query_all(self, sql: str, params: list[object] | None = None):
@@ -318,6 +326,8 @@ class PrometheusMetricAgent:
         opener=None,
         timeout_seconds: int = 8,
         step_seconds: int = 60,
+        active_threads_query_template: str | None = None,
+        slow_sql_count_query_template: str | None = None,
     ) -> None:
         self._mcp_client = mcp_client
         self._client = client
@@ -325,6 +335,12 @@ class PrometheusMetricAgent:
         self._opener = opener
         self._timeout_seconds = timeout_seconds
         self._step_seconds = step_seconds
+        self._active_threads_query_template = (
+            active_threads_query_template or _DEFAULT_ACTIVE_THREADS_QUERY_TEMPLATE
+        )
+        self._slow_sql_count_query_template = (
+            slow_sql_count_query_template or _DEFAULT_SLOW_SQL_COUNT_QUERY_TEMPLATE
+        )
 
     def analyze(self, profile: FaultDiagnosisProfile) -> MetricEvidence:
         metric_ip = profile.business_ip
@@ -343,32 +359,22 @@ class PrometheusMetricAgent:
                 error_message="Prometheus 数据源未配置。",
             )
 
-        query = _cpu_usage_query(metric_ip)
         start = _to_prometheus_utc(profile.start_time)
         end = _to_prometheus_utc(profile.end_time)
         step = f"{self._step_seconds}s"
         errors: list[str] = []
-        series: list[MetricSeries] | None = None
-        for candidate in self._clients_in_order():
-            try:
-                payload = candidate.range_query(
-                    query=query,
-                    start=start,
-                    end=end,
-                    step=step,
-                )
-                series = _metric_series_from_payload(
-                    payload,
-                    metric_name="cpu_usage",
-                    default_ip=metric_ip,
-                    unit="%",
-                )
-                break
-            except Exception as exc:
-                errors.append(str(exc) or exc.__class__.__name__)
-                continue
+        series: list[MetricSeries] = []
+        for spec in self._metric_specs(profile):
+            collected = self._query_metric_spec(
+                spec=spec,
+                start=start,
+                end=end,
+                step=step,
+                errors=errors,
+            )
+            series.extend(collected)
 
-        if series is None:
+        if not series:
             return MetricEvidence(
                 status="failure",
                 metrics=[],
@@ -380,6 +386,70 @@ class PrometheusMetricAgent:
             metrics=series,
             summary=_metric_summary(series),
         )
+
+    def _metric_specs(self, profile: FaultDiagnosisProfile) -> list[dict[str, str]]:
+        business_ip = profile.business_ip or ""
+        management_ip = profile.management_ip or profile.primary_ip or ""
+        return [
+            {
+                "metric_name": "cpu_usage",
+                "query": _cpu_usage_query(business_ip),
+                "default_ip": business_ip,
+                "unit": "%",
+            },
+            {
+                "metric_name": "active_threads",
+                "query": _format_metric_query(
+                    self._active_threads_query_template,
+                    ip=management_ip,
+                    business_ip=business_ip,
+                    management_ip=management_ip,
+                ),
+                "default_ip": management_ip,
+                "unit": "count",
+            },
+            {
+                "metric_name": "slow_sql_count",
+                "query": _format_metric_query(
+                    self._slow_sql_count_query_template,
+                    ip=management_ip,
+                    business_ip=business_ip,
+                    management_ip=management_ip,
+                ),
+                "default_ip": management_ip,
+                "unit": "count",
+            },
+        ]
+
+    def _query_metric_spec(
+        self,
+        *,
+        spec: dict[str, str],
+        start: str,
+        end: str,
+        step: str,
+        errors: list[str],
+    ) -> list[MetricSeries]:
+        for candidate in self._clients_in_order():
+            try:
+                payload = candidate.range_query(
+                    query=spec["query"],
+                    start=start,
+                    end=end,
+                    step=step,
+                )
+                return _metric_series_from_payload(
+                    payload,
+                    metric_name=spec["metric_name"],
+                    default_ip=spec["default_ip"],
+                    unit=spec["unit"],
+                )
+            except Exception as exc:
+                errors.append(
+                    f"{spec['metric_name']}: {str(exc) or exc.__class__.__name__}"
+                )
+                continue
+        return []
 
     def _clients_in_order(self) -> list[PrometheusRangeClient]:
         clients: list[PrometheusRangeClient] = []
@@ -468,19 +538,39 @@ def _metric_point_from_raw(raw_point: object) -> MetricPoint | None:
 
 def _metric_summary(series: list[MetricSeries]) -> str:
     if not series:
-        return "Prometheus 查询成功，但未返回 CPU 使用率数据。"
-    peaks = [
-        max((point.value for point in item.values), default=0.0)
-        for item in series
-    ]
-    peak = max(peaks, default=0.0)
-    return f"CPU 使用率峰值为 {peak:g}%。"
+        return "Prometheus 查询成功，但未返回监控指标数据。"
+    metric_labels = {
+        "cpu_usage": "CPU 使用率",
+        "active_threads": "活跃线程数",
+        "slow_sql_count": "慢 SQL 数",
+    }
+    parts = []
+    for item in series:
+        peak = max((point.value for point in item.values), default=0.0)
+        label = metric_labels.get(item.metric_name, item.metric_name)
+        unit = item.unit or ""
+        parts.append(f"{label}峰值为 {peak:g}{unit}")
+    return "，".join(parts) + "。"
 
 
 def _cpu_usage_query(ip: str) -> str:
     return (
         '100 - (avg by(ip) (rate(node_cpu_seconds_total{mode="idle", '
         f'ip="{ip}"}}[10m])) * 100)'
+    )
+
+
+def _format_metric_query(
+    template: str,
+    *,
+    ip: str,
+    business_ip: str,
+    management_ip: str,
+) -> str:
+    return (
+        template.replace("{management_ip}", management_ip)
+        .replace("{business_ip}", business_ip)
+        .replace("{ip}", ip)
     )
 
 
@@ -606,6 +696,9 @@ def _json_from_text_payload(text: str) -> dict[str, Any] | None:
 
 
 def _normalize_known_metric_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(payload.get("result"), list):
+        return {"status": "success", "data": {"result": payload["result"]}}
+
     if isinstance(payload.get("data"), dict):
         data = payload["data"]
         if isinstance(data.get("result"), list):

@@ -42,6 +42,16 @@ def build_fault_diagnosis_runtime(
         base_url=getattr(settings, "fault_prometheus_base_url", ""),
         timeout_seconds=int(getattr(settings, "fault_prometheus_timeout_seconds", 8)),
         step_seconds=int(getattr(settings, "fault_metric_step_seconds", 60)),
+        active_threads_query_template=getattr(
+            settings,
+            "fault_active_threads_query_template",
+            None,
+        ),
+        slow_sql_count_query_template=getattr(
+            settings,
+            "fault_slow_sql_count_query_template",
+            None,
+        ),
     )
     return FaultDiagnosisRuntime(
         top_sql_agent=top_sql_agent,

@@ -51,3 +51,10 @@ class Settings(BaseSettings):
     fault_prometheus_base_url: str = ""
     fault_prometheus_timeout_seconds: int = 8
     fault_metric_step_seconds: int = 60
+    fault_active_threads_query_template: str = (
+        'ctg_paas_30202624250003{sysCode="database_prod",'
+        'tenant_id="100011",ip="{management_ip}"}'
+    )
+    fault_slow_sql_count_query_template: str = (
+        'increase(mysql_global_status_slow_queries{ip="{management_ip}"}[1m])'
+    )

@@ -100,3 +100,27 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "10.186.17.55" in report.markdown
     assert "select * from orders" in report.markdown
     assert "CPU 使用率持续高于 90%" in report.markdown
+
+
+def test_fault_diagnosis_uses_15_minute_window_around_alert_time():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-2",
+            "input_text": (
+                "请分析订单系统数据库 CPU 告警，管理IP：10.186.17.54，"
+                "告警时间：2026-04-30 14:20:00"
+            ),
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    profile = result["profile"]
+
+    assert profile.start_time == "2026-04-30 14:05:00"
+    assert profile.end_time == "2026-04-30 14:35:00"

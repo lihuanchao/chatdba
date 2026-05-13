@@ -455,10 +455,42 @@ def _recommendations(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> lis
 
 
 def _time_window(input_text: str, now: datetime) -> tuple[str, str]:
+    alert_time = _extract_alert_time(input_text)
+    if alert_time is not None:
+        return (
+            _format_time(alert_time - timedelta(minutes=15)),
+            _format_time(alert_time + timedelta(minutes=15)),
+        )
     if re.search(r"近\s*1\s*小时|最近\s*1\s*小时", input_text):
         start = now - timedelta(hours=1)
         return _format_time(start), _format_time(now)
     return _format_time(now - timedelta(hours=1)), _format_time(now)
+
+
+def _extract_alert_time(text: str) -> datetime | None:
+    patterns = [
+        r"(?:告警时间|故障时间|发生时间|时间)\s*[:：]\s*(?P<value>\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{1,2}(?::\d{1,2})?)",
+        r"\b(?P<value>\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{1,2}(?::\d{1,2})?)\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        parsed = _parse_datetime_text(match.group("value"))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_datetime_text(value: str) -> datetime | None:
+    normalized = value.strip().replace("/", "-")
+    formats = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
+    for fmt in formats:
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _extract_first_ip(text: str) -> str | None:
