@@ -126,9 +126,8 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     assert [metric.metric_name for metric in evidence.metrics] == [
         "cpu_usage",
         "active_threads",
-        "slow_sql_count",
     ]
-    assert [metric.unit for metric in evidence.metrics] == ["%", "count", "count"]
+    assert [metric.unit for metric in evidence.metrics] == ["%", "count"]
     assert evidence.metrics[0].ip == "10.186.17.54"
     assert [point.value for point in evidence.metrics[0].values] == [92.2, 92.2]
     assert client.calls[0]["query"] == (
@@ -139,13 +138,10 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
         'ctg_paas_30202624250003{sysCode="database_prod",'
         'tenant_id="100011",ip="10.186.17.54"}'
     )
-    assert client.calls[2]["query"] == (
-        'increase(mysql_global_status_slow_queries{ip="10.186.17.54"}[1m])'
-    )
     assert client.calls[0]["start"] == "2026-04-30T06:00:00Z"
     assert client.calls[0]["end"] == "2026-04-30T07:00:00Z"
     assert client.calls[0]["step"] == "60s"
-    assert len(client.calls) == 3
+    assert len(client.calls) == 2
 
 
 def test_prometheus_metric_agent_converts_east_8_alert_window_to_utc_range():
@@ -192,7 +188,6 @@ def test_prometheus_metric_agent_records_missing_metric_when_query_returns_no_da
     assert evidence.status == "success"
     assert [metric.metric_name for metric in evidence.metrics] == [
         "cpu_usage",
-        "slow_sql_count",
     ]
     assert len(evidence.missing_metrics) == 1
     assert "active_threads" in evidence.missing_metrics[0]
@@ -217,7 +212,7 @@ def test_prometheus_metric_agent_prefers_mcp_when_available():
     evidence = agent.analyze(make_profile())
 
     assert evidence.status == "success"
-    assert len(mcp_client.calls) == 3
+    assert len(mcp_client.calls) == 2
     assert len(http_client.calls) == 0
 
 
@@ -233,7 +228,7 @@ def test_prometheus_metric_agent_falls_back_to_http_when_mcp_fails():
     evidence = agent.analyze(make_profile())
 
     assert evidence.status == "success"
-    assert len(http_client.calls) == 3
+    assert len(http_client.calls) == 2
     assert evidence.metrics[0].metric_name == "cpu_usage"
 
 

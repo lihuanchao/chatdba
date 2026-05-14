@@ -442,17 +442,6 @@ class PrometheusMetricAgent:
                 "default_ip": management_ip,
                 "unit": "count",
             },
-            {
-                "metric_name": "slow_sql_count",
-                "query": _format_metric_query(
-                    self._slow_sql_count_query_template,
-                    ip=management_ip,
-                    business_ip=business_ip,
-                    management_ip=management_ip,
-                ),
-                "default_ip": management_ip,
-                "unit": "count",
-            },
         ]
 
     def _query_metric_spec(

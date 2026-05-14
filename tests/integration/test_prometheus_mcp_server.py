@@ -40,6 +40,8 @@ def test_prometheus_mcp_server_exposes_execute_range_query_and_returns_matrix_pa
         end=os.getenv("CHATDBA_PROMETHEUS_MCP_TEST_END", "2026-04-30T06:05:00Z"),
         step=os.getenv("CHATDBA_PROMETHEUS_MCP_TEST_STEP", "60s"),
     )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
 
     assert payload["status"] == "success"
     assert isinstance(payload["data"]["result"], list)
