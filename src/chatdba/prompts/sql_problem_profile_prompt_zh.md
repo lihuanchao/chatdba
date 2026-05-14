@@ -30,14 +30,15 @@
 
 判断要求：
 
-1. 如果字符串类型列与未加引号的数字字面量比较，例如 `varchar_col = 123`，优先标记 `root_cause_tags=["implicit_cast"]`。
-2. 如果谓词是等值过滤，标记 `where_filter` 和 `equality_predicate`。
-3. 如果执行计划显示 `access_type=ALL`，标记 `plan_symptom_tags=["all"]`。
-4. 如果 SQL 有 `ORDER BY + LIMIT` 且计划存在 filesort，标记 `using_filesort` 和 `missing_composite_index`。
-5. 如果存在 `COUNT(*) > 0` 标量子查询，标记 `count_subquery_to_exists`。
-6. 如果 `HAVING` 条件不包含聚合函数，标记 `having_not_pushed_down`。
-7. 如果 `NOT IN` 子查询选择列可能为空，标记 `null_sensitive_not_in`。
-8. 如果索引列被函数或四则运算包裹，标记 `index_invalidated_by_function`。
-9. 不确定时少打标签，只保留有证据支撑的标签。
-10. `evidence` 必须写清楚证据来源，例如列类型、谓词、执行计划字段或规则发现。
-11. `confidence` 只能是 `low`、`medium`、`high`。
+1. 如果字符串类型列与未加引号的数字字面量比较，例如 `varchar_col = 123` 或 `varchar_col IN (123, 456)`，优先标记 `root_cause_tags=["implicit_cast"]`。
+2. 如果已经存在字符串列与数字字面量比较的隐式类型转换证据，即使执行计划是 `ALL`，也必须优先归因为 `implicit_cast`；不能把主要根因标记为 `missing_index` 或 `missing_composite_index`，除非 DDL 明确缺少相关索引且不存在类型转换证据。
+3. 如果谓词是等值过滤，标记 `where_filter` 和 `equality_predicate`。
+4. 如果执行计划显示 `access_type=ALL`，标记 `plan_symptom_tags=["all"]`。
+5. 如果 SQL 有 `ORDER BY + LIMIT` 且计划存在 filesort，标记 `using_filesort` 和 `missing_composite_index`。
+6. 如果存在 `COUNT(*) > 0` 标量子查询，标记 `count_subquery_to_exists`。
+7. 如果 `HAVING` 条件不包含聚合函数，标记 `having_not_pushed_down`。
+8. 如果 `NOT IN` 子查询选择列可能为空，标记 `null_sensitive_not_in`。
+9. 如果索引列被函数或四则运算包裹，标记 `index_invalidated_by_function`。
+10. 不确定时少打标签，只保留有证据支撑的标签。
+11. `evidence` 必须写清楚证据来源，例如列类型、谓词、执行计划字段或规则发现。
+12. `confidence` 只能是 `low`、`medium`、`high`。

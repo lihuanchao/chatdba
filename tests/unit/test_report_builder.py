@@ -71,6 +71,24 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
             assert "`id`、`select_type`、`table`、`type`、`possible_keys`、`key`、`key_len`、`ref`、`Extra`" in system_prompt
             assert "`SELECT` 字段与索引覆盖" in system_prompt
             assert "若 DDL 中已存在相同索引或可覆盖该建议的联合索引，禁止重复推荐" in system_prompt
+            for rule_id in range(1, 18):
+                assert f"rule{rule_id:02d}." in system_prompt
+            assert "执行计划为测试环境空表下获取" in system_prompt
+            assert "`INDEX`：利用索引扫描" in system_prompt
+            assert "`RANGE`：范围扫描" in system_prompt
+            assert "`REF`：基于索引的匹配" in system_prompt
+            assert "`EQ_REF`：强索引匹配" in system_prompt
+            assert "`CONST`：常量值匹配" in system_prompt
+            assert "`Using index`（索引覆盖）" in system_prompt
+            assert "`Using where`（需要计算筛选条件，但无索引覆盖）" in system_prompt
+            assert "`LIMIT/OFFSET`" in system_prompt
+            assert "如果 `filtered` 明显不足" in system_prompt
+            assert "rule11. 避免使用 `ORDER BY RAND()`" in system_prompt
+            assert "rule16. 隐式类型转换导致索引失效" in system_prompt
+            assert "rule17. IN子查询重写优化" in system_prompt
+            assert "隐式类型转换证据优先于缺失索引归因" in system_prompt
+            assert "不能把主要瓶颈写成缺少联合索引" in system_prompt
+            assert "规则命中只作为诊断和建议依据，不输出到 `summary`" in system_prompt
             assert "filesort fixed" in user_prompt
             return """
             {
@@ -367,6 +385,24 @@ def test_report_builder_loads_markdown_system_prompt_file():
     assert "`id`、`select_type`、`table`、`type`、`possible_keys`、`key`、`key_len`、`ref`、`Extra`" in prompt
     assert "`SELECT` 字段与索引覆盖" in prompt
     assert "若 DDL 中已存在相同索引或可覆盖该建议的联合索引，禁止重复推荐" in prompt
+    for rule_id in range(1, 18):
+        assert f"rule{rule_id:02d}." in prompt
+    assert "执行计划为测试环境空表下获取" in prompt
+    assert "`INDEX`：利用索引扫描" in prompt
+    assert "`RANGE`：范围扫描" in prompt
+    assert "`REF`：基于索引的匹配" in prompt
+    assert "`EQ_REF`：强索引匹配" in prompt
+    assert "`CONST`：常量值匹配" in prompt
+    assert "`Using index`（索引覆盖）" in prompt
+    assert "`Using where`（需要计算筛选条件，但无索引覆盖）" in prompt
+    assert "`LIMIT/OFFSET`" in prompt
+    assert "如果 `filtered` 明显不足" in prompt
+    assert "rule11. 避免使用 `ORDER BY RAND()`" in prompt
+    assert "rule16. 隐式类型转换导致索引失效" in prompt
+    assert "rule17. IN子查询重写优化" in prompt
+    assert "隐式类型转换证据优先于缺失索引归因" in prompt
+    assert "不能把主要瓶颈写成缺少联合索引" in prompt
+    assert "规则命中只作为诊断和建议依据，不输出到 `summary`" in prompt
 
 
 def test_report_builder_uses_case_retriever_when_available():

@@ -600,7 +600,7 @@ def _implicit_cast_evidence(
 
     findings: list[str] = []
     for predicate in sql_features.predicates:
-        for column in _numeric_literal_equality_columns(predicate):
+        for column in _numeric_literal_comparison_columns(predicate):
             data_type = column_types.get(column.lower())
             if data_type in STRING_COLUMN_TYPES:
                 findings.append(
@@ -623,10 +623,11 @@ def _column_types_from_create_tables(create_tables: dict[str, str]) -> dict[str,
     return column_types
 
 
-def _numeric_literal_equality_columns(predicate: str) -> list[str]:
+def _numeric_literal_comparison_columns(predicate: str) -> list[str]:
     patterns = [
         r"(?:`?[A-Za-z_][\w]*`?\.)?`?(?P<column>[A-Za-z_][\w]*)`?\s*=\s*[+-]?\d+(?:\.\d+)?\b",
         r"\b[+-]?\d+(?:\.\d+)?\s*=\s*(?:`?[A-Za-z_][\w]*`?\.)?`?(?P<column>[A-Za-z_][\w]*)`?",
+        r"(?:`?[A-Za-z_][\w]*`?\.)?`?(?P<column>[A-Za-z_][\w]*)`?\s+in\s*\(\s*[+-]?\d+(?:\.\d+)?(?:\s*,\s*[+-]?\d+(?:\.\d+)?)*\s*\)",
     ]
     columns: list[str] = []
     for pattern in patterns:
