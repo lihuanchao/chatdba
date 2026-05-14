@@ -582,6 +582,32 @@ def test_handler_prompts_for_schema_when_join_tables_cannot_resolve_database():
     assert responder.finished[-1] is False
 
 
+def test_handler_prompts_for_schema_when_join_table_route_is_missing():
+    responder = RecordingResponder()
+    service = MultiTableSchemaRouteTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    result = handler.handle(
+        make_message(
+            "SQL优化 select count(*) from wmsoutputdetail od "
+            "join wmsoutputmain om on od.ChuKuId = om.ChuKuId "
+            "left join wmssortingdetail sd on od.yuandanid = sd.sortingId"
+        )
+    )
+
+    assert result.accepted is False
+    assert result.status == TaskStatus.FAILED
+    assert "请补充数据库库名后继续分析" in responder.messages[-1]
+    assert "wmsoutputdetail" in responder.messages[-1]
+    assert "wmsoutputmain" in responder.messages[-1]
+    assert "wmssortingdetail" in responder.messages[-1]
+    assert "# SQL优化报告" not in "".join(responder.messages)
+
+
 def test_handler_reuses_previous_join_sql_after_schema_prompt():
     responder = RecordingResponder()
     service = MultiTableSchemaRouteTaskService()

@@ -187,6 +187,45 @@ def test_v1_stream_prompts_for_schema_when_join_tables_need_database(monkeypatch
     assert "event: end" in response.text
 
 
+def test_v1_stream_prompts_for_schema_when_join_table_route_is_missing(monkeypatch):
+    class MissingJoinRouteTaskService:
+        def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+            return OptimizationTaskExecution(
+                task_id="task-missing-join-route",
+                status=TaskStatus.FAILED,
+                error=(
+                    "SQL 多表关联无法唯一确定数据库，请补充库名后重试："
+                    "wmsoutputdetail, wmsoutputmain, wmssortingdetail"
+                ),
+            )
+
+    monkeypatch.setattr(
+        "chatdba.app.main._build_task_service",
+        lambda: MissingJoinRouteTaskService(),
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/stream",
+        json={
+            "input": (
+                "select count(*) from wmsoutputdetail od "
+                "join wmsoutputmain om on od.ChuKuId = om.ChuKuId "
+                "left join wmssortingdetail sd on od.yuandanid = sd.sortingId"
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert "event: markdown" in response.text
+    assert "请补充数据库库名后继续分析" in response.text
+    assert "wmsoutputdetail" in response.text
+    assert "wmsoutputmain" in response.text
+    assert "wmssortingdetail" in response.text
+    assert "# SQL优化报告" not in response.text
+    assert "需要补充数据库库名" in response.text
+
+
 def test_v1_stream_degrades_payload_extraction_failure_to_sse(monkeypatch):
     def broken_extract(payload):
         raise RuntimeError("bad graph payload")

@@ -110,6 +110,15 @@ class MetadataRouter:
             for index, target in enumerate(tables)
         }
         if not rows or any(not matches for matches in candidate_rows.values()):
+            if self._should_request_schema_for_missing_routes(tables):
+                return EvidenceEnvelope(
+                    status=EvidenceStatus.SQL_ONLY,
+                    missing_evidence=["route_info", "explain_json", "create_table"],
+                    collection_errors=[
+                        MULTI_TABLE_SCHEMA_MARKER
+                        + ", ".join(self._unqualified_table_names(tables))
+                    ],
+                ), []
             return EvidenceEnvelope(
                 status=EvidenceStatus.SQL_ONLY,
                 missing_evidence=["route_info", "explain_json", "create_table"],
@@ -277,6 +286,12 @@ class MetadataRouter:
                 continue
             names.append(table.table_name)
         return names or ["相关表"]
+
+    def _should_request_schema_for_missing_routes(
+        self,
+        tables: list[MysqlTableTarget],
+    ) -> bool:
+        return len(self._unqualified_table_names(tables)) > 1
 
     def _has_common_instance(
         self,

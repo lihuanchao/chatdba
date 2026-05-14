@@ -386,6 +386,55 @@ def test_router_degrades_when_unqualified_tables_have_no_common_schema():
     assert "users" in route.collection_errors[0]
 
 
+def test_router_asks_for_schema_when_join_has_missing_unqualified_table_route():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="wms",
+                table_name="wmsoutputdetail",
+                instance_id="mysql-wms-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="wms",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="wms",
+                table_name="wmsoutputmain",
+                instance_id="mysql-wms-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="wms",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    route = router.resolve(
+        [
+            MysqlTableTarget(schema_name=None, table_name="wmsoutputdetail"),
+            MysqlTableTarget(schema_name=None, table_name="wmsoutputmain"),
+            MysqlTableTarget(schema_name=None, table_name="wmssortingdetail"),
+        ]
+    )
+
+    assert route.status == EvidenceStatus.SQL_ONLY
+    assert route.route is None
+    assert "请补充库名" in route.collection_errors[0]
+    assert "wmsoutputdetail" in route.collection_errors[0]
+    assert "wmsoutputmain" in route.collection_errors[0]
+    assert "wmssortingdetail" in route.collection_errors[0]
+
+
 def test_router_degrades_when_tables_span_multiple_instances():
     repository = FakeMetadataRouteRepository(
         [
