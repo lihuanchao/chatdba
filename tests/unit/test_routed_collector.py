@@ -161,3 +161,36 @@ def test_routed_collector_uses_router_resolved_tables_for_ddl_lookup():
 
     assert evidence.status == EvidenceStatus.FULL
     assert evidence.create_tables["shop.orders"].startswith("CREATE TABLE orders")
+
+
+def test_routed_collector_uses_metadata_table_name_case_after_case_insensitive_route():
+    class ResolvedTableRouter(FakeRouter):
+        def resolve_with_tables(self, tables):
+            return self.envelope, [
+                MysqlTableTarget(schema_name="wms", table_name="sygcangkuinfo")
+            ]
+
+    class RecordingMysqlClient(SuccessfulMysqlClient):
+        def __init__(self):
+            self.queries = []
+
+        def query_one(self, sql: str):
+            self.queries.append(sql)
+            if sql.startswith("SHOW CREATE TABLE"):
+                return {"Create Table": "CREATE TABLE sygcangkuinfo (id bigint)"}
+            return super().query_one(sql)
+
+    client = RecordingMysqlClient()
+    collector = RoutedMysqlEvidenceCollector(
+        router=ResolvedTableRouter(make_full_route_envelope()),
+        connection_factory=FakeConnectionFactory(client),
+    )
+
+    evidence = collector.collect(
+        "select * from WMS.SygCangKuInfo",
+        [MysqlTableTarget(schema_name="WMS", table_name="SygCangKuInfo")],
+    )
+
+    assert evidence.status == EvidenceStatus.FULL
+    assert "wms.sygcangkuinfo" in evidence.create_tables
+    assert "SHOW CREATE TABLE `wms`.`sygcangkuinfo`" in client.queries

@@ -74,9 +74,26 @@ def test_metadata_route_repository_queries_unqualified_table_by_name_only():
         [MysqlTableTarget(schema_name=None, table_name="orders")]
     )
 
-    assert "r.table_name = %s" in client.sql
-    assert "r.schema_name = %s" not in client.sql
+    assert "LOWER(r.table_name) = LOWER(%s)" in client.sql
+    assert "LOWER(r.schema_name) = LOWER(%s)" not in client.sql
     assert client.params == ["orders"]
+
+
+def test_metadata_route_repository_queries_schema_and_table_case_insensitively():
+    client = FakeMetadataMysqlClient()
+    repository = MysqlMetadataRouteRepository(
+        client=client,
+        route_table="table_routes",
+        instance_table="db_instances",
+    )
+
+    repository.find_routes(
+        [MysqlTableTarget(schema_name="WMS", table_name="SygCangKuInfo")]
+    )
+
+    assert "LOWER(r.schema_name) = LOWER(%s)" in client.sql
+    assert "LOWER(r.table_name) = LOWER(%s)" in client.sql
+    assert client.params == ["WMS", "SygCangKuInfo"]
 
 
 def test_router_returns_single_instance_route():
@@ -107,6 +124,54 @@ def test_router_returns_single_instance_route():
     assert route.route.instance_id == "mysql-order-ro"
     assert route.route.credentials == {"username": "readonly", "password": "secret"}
     assert route.collection_errors == []
+
+
+def test_router_matches_schema_and_table_names_case_insensitively():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="wms",
+                table_name="sygcangkuinfo",
+                instance_id="mysql-wms-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="wms",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="wms",
+                table_name="sygkuweiinfo",
+                instance_id="mysql-wms-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="wms",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    envelope, resolved_tables = router.resolve_with_tables(
+        [
+            MysqlTableTarget(schema_name="WMS", table_name="SygCangKuInfo"),
+            MysqlTableTarget(schema_name="WMS", table_name="SygKuWeiInfo"),
+        ]
+    )
+
+    assert envelope.status == EvidenceStatus.FULL
+    assert envelope.route.schema_names == ["wms"]
+    assert resolved_tables == [
+        MysqlTableTarget(schema_name="wms", table_name="sygcangkuinfo"),
+        MysqlTableTarget(schema_name="wms", table_name="sygkuweiinfo"),
+    ]
 
 
 def test_router_asks_for_schema_when_unqualified_single_table_is_ambiguous():

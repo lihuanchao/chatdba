@@ -7,6 +7,10 @@ from chatdba.db.route_errors import MULTI_TABLE_SCHEMA_MARKER
 from chatdba.domain.models import EvidenceEnvelope, EvidenceStatus, SourceRoute
 
 
+def _same_identifier(left: str, right: str) -> bool:
+    return left.casefold() == right.casefold()
+
+
 class MetadataRouteRow(BaseModel):
     schema_name: str
     table_name: str
@@ -61,10 +65,13 @@ class MysqlMetadataRouteRepository:
         params: list[object] = []
         for table in tables:
             if table.schema_name:
-                predicates.append("(r.schema_name = %s AND r.table_name = %s)")
+                predicates.append(
+                    "(LOWER(r.schema_name) = LOWER(%s) "
+                    "AND LOWER(r.table_name) = LOWER(%s))"
+                )
                 params.extend([table.schema_name, table.table_name])
             else:
-                predicates.append("(r.table_name = %s)")
+                predicates.append("(LOWER(r.table_name) = LOWER(%s))")
                 params.append(table.table_name)
 
         sql = f"""
@@ -216,10 +223,10 @@ class MetadataRouter:
             return [
                 row
                 for row in rows
-                if row.schema_name == target.schema_name
-                and row.table_name == target.table_name
+                if _same_identifier(row.schema_name, target.schema_name)
+                and _same_identifier(row.table_name, target.table_name)
             ]
-        return [row for row in rows if row.table_name == target.table_name]
+        return [row for row in rows if _same_identifier(row.table_name, target.table_name)]
 
     def _select_route_plan(
         self,
