@@ -11,6 +11,7 @@ from chatdba.domain.models import (
     TaskStatus,
 )
 from chatdba.db.route_errors import is_route_resolution_blocker
+from chatdba.sql.schema_qualification import split_schema_prefixed_sql
 from chatdba.tasks.events import ProgressEvent
 from chatdba.tasks.repository import TaskRepository
 from chatdba.workflow.report_builder import OptimizationReportComposer
@@ -156,9 +157,11 @@ class OptimizationTaskService:
         raw_sql: str,
         dingtalk_context: DingTalkContext | None,
     ) -> SqlOptimizationRequest:
+        schema_name, sql = split_schema_prefixed_sql(raw_sql)
         return SqlOptimizationRequest(
             task_id=self._task_id_factory(),
-            raw_sql=raw_sql,
+            raw_sql=sql,
+            schema_name=schema_name,
             dingtalk=dingtalk_context,
         )
 

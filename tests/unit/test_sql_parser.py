@@ -2,6 +2,7 @@ from chatdba.sql.parser import parse_sql_features
 from chatdba.sql.schema_qualification import (
     extract_schema_name_reply,
     qualify_unqualified_tables,
+    split_schema_prefixed_sql,
     unqualified_table_names,
 )
 
@@ -64,6 +65,31 @@ def test_extract_schema_name_reply_allows_hyphenated_schema_names():
     assert extract_schema_name_reply("international-base") == "international-base"
     assert extract_schema_name_reply("库名: international-base") == "international-base"
     assert extract_schema_name_reply("`international-base`") == "international-base"
+
+
+def test_split_schema_prefixed_sql_extracts_database_name_before_select():
+    schema_name, sql = split_schema_prefixed_sql(
+        "zqsoft_mom_wms_istorage_lw  SELECT count(*) FROM wmsoutputdetail"
+    )
+
+    assert schema_name == "zqsoft_mom_wms_istorage_lw"
+    assert sql == "SELECT count(*) FROM wmsoutputdetail"
+
+
+def test_split_schema_prefixed_sql_allows_quoted_hyphenated_database_name():
+    schema_name, sql = split_schema_prefixed_sql(
+        "`international-base` SELECT * FROM sys_file_info"
+    )
+
+    assert schema_name == "international-base"
+    assert sql == "SELECT * FROM sys_file_info"
+
+
+def test_split_schema_prefixed_sql_preserves_plain_select():
+    schema_name, sql = split_schema_prefixed_sql("SELECT * FROM orders")
+
+    assert schema_name is None
+    assert sql == "SELECT * FROM orders"
 
 
 def test_qualify_unqualified_tables_quotes_hyphenated_schema_names():

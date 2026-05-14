@@ -16,6 +16,7 @@ from chatdba.sql.schema_qualification import (
     extract_schema_name_reply,
     unqualified_table_names,
     qualify_unqualified_tables,
+    split_schema_prefixed_sql,
 )
 from chatdba.tasks.service import OptimizationTaskExecution
 from chatdba.worker.run_task import ProgressSink
@@ -368,6 +369,7 @@ def is_fault_diagnosis_message(text: str) -> bool:
 
 def is_sql_optimization_message(message: DingTalkInboundMessage) -> bool:
     raw_sql = extract_sql_from_message(message).strip()
+    _schema_name, raw_sql = split_schema_prefixed_sql(raw_sql)
     return bool(re.match(r"(?is)^select\b", raw_sql))
 
 

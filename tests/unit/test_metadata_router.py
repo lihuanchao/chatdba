@@ -174,6 +174,67 @@ def test_router_matches_schema_and_table_names_case_insensitively():
     ]
 
 
+def test_router_resolves_schema_prefixed_join_tables_without_unqualified_ambiguity():
+    repository = FakeMetadataRouteRepository(
+        [
+            MetadataRouteRow(
+                schema_name="zqsoft_mom_wms_istorage_lw",
+                table_name="wmsoutputdetail",
+                instance_id="mysql-wms-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="zqsoft_mom_wms_istorage_lw",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+            MetadataRouteRow(
+                schema_name="zqsoft_mom_wms_istorage_lw",
+                table_name="wmsoutputmain",
+                instance_id="mysql-wms-ro",
+                host="10.0.0.10",
+                port=3306,
+                readonly_username="readonly",
+                readonly_password="secret",
+                default_schema="zqsoft_mom_wms_istorage_lw",
+                db_type="mysql",
+                version="8.0",
+                enabled=True,
+            ),
+        ]
+    )
+    router = MetadataRouter(repository)
+
+    envelope, resolved_tables = router.resolve_with_tables(
+        [
+            MysqlTableTarget(
+                schema_name="zqsoft_mom_wms_istorage_lw",
+                table_name="wmsoutputdetail",
+            ),
+            MysqlTableTarget(
+                schema_name="zqsoft_mom_wms_istorage_lw",
+                table_name="wmsoutputmain",
+            ),
+        ]
+    )
+
+    assert envelope.status == EvidenceStatus.FULL
+    assert envelope.route.instance_id == "mysql-wms-ro"
+    assert envelope.route.default_schema == "zqsoft_mom_wms_istorage_lw"
+    assert resolved_tables == [
+        MysqlTableTarget(
+            schema_name="zqsoft_mom_wms_istorage_lw",
+            table_name="wmsoutputdetail",
+        ),
+        MysqlTableTarget(
+            schema_name="zqsoft_mom_wms_istorage_lw",
+            table_name="wmsoutputmain",
+        ),
+    ]
+
+
 def test_router_asks_for_schema_when_unqualified_single_table_is_ambiguous():
     repository = FakeMetadataRouteRepository(
         [

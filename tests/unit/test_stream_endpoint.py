@@ -58,6 +58,38 @@ def test_v1_stream_returns_sse_events(monkeypatch):
     assert "event: end" in response.text
 
 
+def test_v1_stream_routes_schema_prefixed_sql_to_sql_service(monkeypatch):
+    seen = {}
+
+    class FakeTaskService:
+        def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+            seen["raw_sql"] = raw_sql
+            return OptimizationTaskExecution(
+                task_id="task-schema-prefix",
+                status=TaskStatus.COMPLETED,
+                result={"report": _build_report()},
+            )
+
+    monkeypatch.setattr("chatdba.app.main._build_task_service", lambda: FakeTaskService())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/stream",
+        json={
+            "input": (
+                "zqsoft_mom_wms_istorage_lw SELECT count(*) "
+                "FROM wmsoutputdetail"
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen["raw_sql"] == (
+        "zqsoft_mom_wms_istorage_lw SELECT count(*) FROM wmsoutputdetail"
+    )
+    assert "# SQL优化报告" in response.text
+
+
 def test_v1_stream_returns_usage_event_when_sql_is_missing():
     client = TestClient(create_app())
 

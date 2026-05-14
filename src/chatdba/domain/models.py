@@ -41,6 +41,7 @@ class DingTalkContext(BaseModel):
 class SqlOptimizationRequest(BaseModel):
     task_id: str
     raw_sql: str
+    schema_name: str | None = None
     dingtalk: DingTalkContext | None = None
 
 

@@ -45,6 +45,23 @@ class MissingRouteJoinCollector:
         )
 
 
+class RecordingCollector:
+    def __init__(self):
+        self.calls = []
+
+    def collect(self, sql, tables):
+        self.calls.append((sql, tables))
+        return EvidenceEnvelope(
+            status=EvidenceStatus.FULL,
+            explain_json={"query_block": {"table": {"access_type": "ALL"}}},
+            create_tables={
+                "zqsoft_mom_wms_istorage_lw.wmsoutputdetail": (
+                    "CREATE TABLE wmsoutputdetail (id bigint)"
+                )
+            },
+        )
+
+
 def test_sql_optimization_graph_stops_when_table_name_requires_schema():
     graph = build_sql_optimization_graph(collector=AmbiguousTableCollector())
 
@@ -59,6 +76,26 @@ def test_sql_optimization_graph_stops_when_table_name_requires_schema():
     assert "请补充库名" in result["evidence"].collection_errors[0]
     assert "findings" not in result
     assert "report" not in result
+
+
+def test_sql_optimization_graph_qualifies_tables_when_schema_name_is_provided():
+    collector = RecordingCollector()
+    graph = build_sql_optimization_graph(collector=collector)
+
+    result = graph.invoke(
+        {
+            "task_id": "task-schema-prefix",
+            "schema_name": "zqsoft_mom_wms_istorage_lw",
+            "raw_sql": "SELECT count(*) FROM wmsoutputdetail",
+        }
+    )
+
+    assert "report" in result
+    assert collector.calls[0][0] == (
+        "SELECT COUNT(*) FROM zqsoft_mom_wms_istorage_lw.wmsoutputdetail"
+    )
+    assert collector.calls[0][1][0].schema_name == "zqsoft_mom_wms_istorage_lw"
+    assert collector.calls[0][1][0].table_name == "wmsoutputdetail"
 
 
 def test_sql_optimization_graph_stops_when_join_table_route_is_missing():

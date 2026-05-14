@@ -7,6 +7,7 @@ from chatdba.domain.report_schema import OptimizationReport
 class SqlOptimizationState(TypedDict, total=False):
     task_id: str
     raw_sql: str
+    schema_name: str | None
     default_schema: str
     sql_features: SqlFeatures
     evidence: EvidenceEnvelope

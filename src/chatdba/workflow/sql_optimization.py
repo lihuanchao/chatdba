@@ -5,6 +5,7 @@ from chatdba.db.route_errors import is_route_resolution_blocker
 from chatdba.explain.mysql_json import extract_plan_features
 from chatdba.rules.mysql_rules import run_mysql_rules
 from chatdba.sql.parser import parse_sql_features
+from chatdba.sql.schema_qualification import qualify_unqualified_tables, unqualified_table_names
 from chatdba.workflow.report_builder import OptimizationReportComposer
 from chatdba.workflow.state import SqlOptimizationState
 
@@ -25,7 +26,18 @@ def build_sql_optimization_graph(
             default_schema=state.get("default_schema", "default")
         )
         targets = resolver.resolve_tables(sql_features.tables)
-        return {"evidence": collector.collect(state["raw_sql"], targets)}
+        schema_name = state.get("schema_name")
+        evidence_sql = state["raw_sql"]
+        if schema_name:
+            table_names = unqualified_table_names(evidence_sql)
+            if table_names:
+                evidence_sql = qualify_unqualified_tables(
+                    evidence_sql,
+                    schema_name=schema_name,
+                    table_names=table_names,
+                )
+                targets = resolver.resolve_tables(parse_sql_features(evidence_sql).tables)
+        return {"evidence": collector.collect(evidence_sql, targets)}
 
     def route_after_evidence(state: SqlOptimizationState) -> str:
         evidence = state["evidence"]

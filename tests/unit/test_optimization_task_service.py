@@ -50,8 +50,32 @@ def test_task_service_builds_payload_and_runs_worker():
     assert callable(seen["progress_sink"])
     assert seen["task_payload"]["task_id"] == "task-1"
     assert seen["task_payload"]["raw_sql"] == "select * from orders"
+    assert seen["task_payload"]["schema_name"] is None
     assert seen["task_payload"]["dingtalk"]["conversation_id"] == "conv-1"
     assert progress == ["Parsing SQL\n"]
+
+
+def test_task_service_splits_schema_prefixed_sql_into_payload():
+    seen = {}
+
+    def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
+        seen["task_payload"] = task_payload
+        return {"report": {"summary": "ok"}}
+
+    service = OptimizationTaskService(
+        collector=object(),
+        task_runner=fake_runner,
+        task_id_factory=lambda: "task-schema-prefix",
+    )
+
+    execution = service.run_sql(
+        raw_sql="zqsoft_mom_wms_istorage_lw SELECT count(*) FROM wmsoutputdetail",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.COMPLETED
+    assert seen["task_payload"]["schema_name"] == "zqsoft_mom_wms_istorage_lw"
+    assert seen["task_payload"]["raw_sql"] == "SELECT count(*) FROM wmsoutputdetail"
 
 
 def test_task_service_converts_runner_exception_to_failed_execution():

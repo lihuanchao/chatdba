@@ -362,6 +362,26 @@ def test_handler_runs_task_and_sends_start_progress_and_report():
     assert "## 索引推荐" in full_stream_text
 
 
+def test_handler_accepts_schema_prefixed_sql_message():
+    responder = RecordingResponder()
+    service = SuccessfulTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    result = handler.handle(
+        make_message("SQL优化 zqsoft_mom_wms_istorage_lw SELECT count(*) FROM wmsoutputdetail")
+    )
+
+    assert result.accepted is True
+    assert service.calls[0]["raw_sql"] == (
+        "zqsoft_mom_wms_istorage_lw SELECT count(*) FROM wmsoutputdetail"
+    )
+    assert "# SQL优化报告" in "".join(responder.messages)
+
+
 def test_handler_sends_failure_message_when_task_fails():
     responder = RecordingResponder()
     handler = DingTalkSqlOptimizationHandler(
