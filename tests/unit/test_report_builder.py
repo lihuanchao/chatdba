@@ -64,8 +64,13 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
                 return EMPTY_PROBLEM_PROFILE_JSON
             assert "SQL优化报告" in system_prompt
             assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in system_prompt
+            assert "`summary` 必须是 30 字以内的精简自然语言结论" in system_prompt
+            assert "`summary` 禁止输出命中规则列表" in system_prompt
             assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in system_prompt
             assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in system_prompt
+            assert "`id`、`select_type`、`table`、`type`、`possible_keys`、`key`、`key_len`、`ref`、`Extra`" in system_prompt
+            assert "`SELECT` 字段与索引覆盖" in system_prompt
+            assert "若 DDL 中已存在相同索引或可覆盖该建议的联合索引，禁止重复推荐" in system_prompt
             assert "filesort fixed" in user_prompt
             return """
             {
@@ -355,8 +360,13 @@ def test_report_builder_loads_markdown_system_prompt_file():
     assert "# ChatDBA SQL优化报告生成提示词（中文）" in prompt
     assert "仅返回合法 JSON" in prompt
     assert "summary`、`sql_rewrites`、`index_recommendations` 必须综合" in prompt
+    assert "`summary` 必须是 30 字以内的精简自然语言结论" in prompt
+    assert "`summary` 禁止输出命中规则列表" in prompt
     assert "SQL重写建议（`sql_rewrites`）必须基于表结构、执行计划、关联案例综合分析" in prompt
     assert "索引推荐（`index_recommendations`）必须先检查现有 DDL" in prompt
+    assert "`id`、`select_type`、`table`、`type`、`possible_keys`、`key`、`key_len`、`ref`、`Extra`" in prompt
+    assert "`SELECT` 字段与索引覆盖" in prompt
+    assert "若 DDL 中已存在相同索引或可覆盖该建议的联合索引，禁止重复推荐" in prompt
 
 
 def test_report_builder_uses_case_retriever_when_available():

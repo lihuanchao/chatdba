@@ -17,6 +17,7 @@ src/chatdba/db/__init__.py
 src/chatdba/db/metadata_repository.py
 src/chatdba/db/metadata_router.py
 src/chatdba/db/mysql_collector.py
+src/chatdba/db/route_errors.py
 src/chatdba/db/routed_collector.py
 src/chatdba/db/runtime_mysql.py
 src/chatdba/dingtalk/__init__.py
@@ -48,6 +49,7 @@ src/chatdba/rules/mysql_rules.py
 src/chatdba/sql/__init__.py
 src/chatdba/sql/parser.py
 src/chatdba/sql/safety.py
+src/chatdba/sql/schema_qualification.py
 src/chatdba/tasks/__init__.py
 src/chatdba/tasks/events.py
 src/chatdba/tasks/fault_service.py
