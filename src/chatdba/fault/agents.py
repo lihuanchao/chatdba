@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 from urllib.parse import urlencode
 import urllib.request
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from chatdba.db.runtime_mysql import MysqlConnectionConfig, RuntimeMysqlClient
 from chatdba.domain.fault_diagnosis import (
@@ -362,8 +363,8 @@ class PrometheusMetricAgent:
                 error_message="Prometheus 数据源未配置。",
             )
 
-        start = _to_prometheus_utc(profile.start_time)
-        end = _to_prometheus_utc(profile.end_time)
+        start = _to_prometheus_utc(profile.start_time, profile.timezone)
+        end = _to_prometheus_utc(profile.end_time, profile.timezone)
         step = f"{self._step_seconds}s"
         errors: list[str] = []
         missing_metrics: list[str] = []
@@ -613,9 +614,13 @@ def _format_metric_query(
     )
 
 
-def _to_prometheus_utc(value: str) -> str:
+def _to_prometheus_utc(value: str, source_timezone: str = "Asia/Shanghai") -> str:
     local_time = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-    utc_time = local_time - timedelta(hours=8)
+    try:
+        source_tz = ZoneInfo(source_timezone or "Asia/Shanghai")
+    except ZoneInfoNotFoundError:
+        source_tz = ZoneInfo("Asia/Shanghai")
+    utc_time = local_time.replace(tzinfo=source_tz).astimezone(ZoneInfo("UTC"))
     return utc_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

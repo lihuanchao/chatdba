@@ -148,6 +148,41 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     assert len(client.calls) == 3
 
 
+def test_prometheus_metric_agent_converts_east_8_alert_window_to_utc_range():
+    client = RecordingPrometheusClient()
+    agent = PrometheusMetricAgent(client=client, step_seconds=60)
+    profile = make_profile().model_copy(
+        update={
+            "alert_time": "2026-05-13 09:45:03",
+            "start_time": "2026-05-13 09:15:03",
+            "end_time": "2026-05-13 09:45:03",
+            "timezone": "Asia/Shanghai",
+        }
+    )
+
+    agent.analyze(profile)
+
+    assert client.calls[0]["start"] == "2026-05-13T01:15:03Z"
+    assert client.calls[0]["end"] == "2026-05-13T01:45:03Z"
+
+
+def test_prometheus_metric_agent_respects_utc_profile_timezone():
+    client = RecordingPrometheusClient()
+    agent = PrometheusMetricAgent(client=client, step_seconds=60)
+    profile = make_profile().model_copy(
+        update={
+            "start_time": "2026-05-13 01:15:03",
+            "end_time": "2026-05-13 01:45:03",
+            "timezone": "UTC",
+        }
+    )
+
+    agent.analyze(profile)
+
+    assert client.calls[0]["start"] == "2026-05-13T01:15:03Z"
+    assert client.calls[0]["end"] == "2026-05-13T01:45:03Z"
+
+
 def test_prometheus_metric_agent_records_missing_metric_when_query_returns_no_data():
     client = MissingActiveThreadsPrometheusClient()
     agent = PrometheusMetricAgent(client=client, step_seconds=60)
