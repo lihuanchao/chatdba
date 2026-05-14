@@ -257,6 +257,36 @@ class _FakeSseResponse:
         return None
 
 
+class _FakeStreamingSseResponse:
+    def __init__(self) -> None:
+        self._lines: list[bytes] = [
+            b"event: endpoint\n",
+            b"data: /messages/?session_id=session-1\n",
+            b"\n",
+        ]
+        self.headers = {"Content-Type": "text/event-stream"}
+
+    def push_jsonrpc(self, payload: dict) -> None:
+        self._lines.extend(
+            [
+                b"event: message\n",
+                f"data: {json.dumps(payload, ensure_ascii=False)}\n".encode("utf-8"),
+                b"\n",
+            ]
+        )
+
+    def readline(self) -> bytes:
+        if not self._lines:
+            return b""
+        return self._lines.pop(0)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return None
+
+
 class _FakeHttpResponse:
     def __init__(self, body: str, headers: dict[str, str] | None = None) -> None:
         self._body = body.encode("utf-8")
@@ -395,12 +425,97 @@ def test_prometheus_mcp_client_supports_legacy_sse_transport_and_calls_range_too
         "tools/list",
         "tools/call",
     ]
+    assert seen["posts"][0]["url"] == "http://10.186.42.51:8080/messages/?session_id=session-1"
     assert seen["posts"][-1]["payload"]["params"]["arguments"] == {
         "query": "up",
         "start": "2026-04-30T06:00:00Z",
         "end": "2026-04-30T07:00:00Z",
         "step": "60s",
     }
+
+
+def test_prometheus_mcp_client_reads_jsonrpc_responses_from_legacy_sse_stream():
+    sse = _FakeStreamingSseResponse()
+    seen = {"posts": []}
+
+    def fake_opener(request, timeout=0):
+        if request.get_method() == "GET":
+            return sse
+
+        payload = json.loads(request.data.decode("utf-8"))
+        seen["posts"].append(payload["method"])
+        if payload["method"] == "initialize":
+            sse.push_jsonrpc(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                    },
+                }
+            )
+        elif payload["method"] == "notifications/initialized":
+            pass
+        elif payload["method"] == "tools/list":
+            sse.push_jsonrpc(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"tools": [{"name": "execute_range_query"}]},
+                }
+            )
+        elif payload["method"] == "tools/call":
+            sse.push_jsonrpc(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(
+                                    {
+                                        "resultType": "matrix",
+                                        "result": [
+                                            {
+                                                "metric": {"ip": "10.186.17.54"},
+                                                "values": [[1777528800, "91.2"]],
+                                            }
+                                        ],
+                                    }
+                                ),
+                            }
+                        ],
+                        "isError": False,
+                    },
+                }
+            )
+        return _FakeHttpResponse("Accepted", headers={"Content-Type": "text/plain"})
+
+    client = PrometheusMcpClient(
+        sse_url="http://10.186.42.51:8080/sse",
+        headers={},
+        timeout_seconds=50,
+        sse_read_timeout_seconds=50,
+        opener=fake_opener,
+    )
+
+    payload = client.range_query(
+        query="up",
+        start="2026-04-30T06:00:00Z",
+        end="2026-04-30T07:00:00Z",
+        step="60s",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["data"]["result"][0]["values"] == [[1777528800, "91.2"]]
+    assert seen["posts"] == [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "tools/call",
+    ]
 
 
 def test_prometheus_http_client_calls_query_range_api():

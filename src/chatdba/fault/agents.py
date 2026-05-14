@@ -4,7 +4,7 @@ import json
 import itertools
 from datetime import datetime, timedelta
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 import urllib.request
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -71,6 +71,7 @@ class PrometheusMcpClient:
         self._opener = opener or urllib.request.urlopen
         self._session_id: str | None = None
         self._messages_url: str | None = None
+        self._sse_response = None
         self._request_ids = itertools.count(1)
         self._tool_name: str | None = None
 
@@ -129,17 +130,19 @@ class PrometheusMcpClient:
         request = urllib.request.Request(self._sse_url, method="GET")
         for key, value in self._headers.items():
             request.add_header(key, value)
-        with self._opener(request, timeout=self._sse_read_timeout_seconds) as response:
-            headers = _response_headers_dict(response)
-            session_id = headers.get("mcp-session-id")
-            endpoint_data = _read_sse_event_data(response, event_name="endpoint")
+        response = self._opener(request, timeout=self._sse_read_timeout_seconds)
+        if hasattr(response, "__enter__"):
+            response = response.__enter__()
+        self._sse_response = response
+        headers = _response_headers_dict(response)
+        session_id = headers.get("mcp-session-id")
+        endpoint_data = _read_sse_event_data(response, event_name="endpoint")
         if not endpoint_data:
             raise RuntimeError("MCP SSE endpoint did not provide messages URL.")
         if endpoint_data.startswith("http://") or endpoint_data.startswith("https://"):
             messages_url = endpoint_data
         else:
-            base = self._sse_url.rstrip("/")
-            messages_url = f"{base}{endpoint_data}"
+            messages_url = urljoin(self._sse_url, endpoint_data)
         if not session_id:
             session_id = _extract_session_id_from_messages_url(messages_url)
         self._session_id = session_id
@@ -203,7 +206,28 @@ class PrometheusMcpClient:
             body = response.read().decode("utf-8").strip()
         if not body:
             return None
-        return json.loads(body)
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            if body.lower() == "accepted":
+                request_id = payload.get("id")
+                if request_id is None:
+                    return None
+                return self._read_jsonrpc_response_from_sse(int(request_id))
+            raise
+
+    def _read_jsonrpc_response_from_sse(self, request_id: int) -> dict[str, Any] | None:
+        if self._sse_response is None:
+            raise RuntimeError("MCP SSE response stream is not open.")
+        while True:
+            data = _read_sse_event_data(self._sse_response, event_name="message")
+            if not data:
+                raise RuntimeError("MCP SSE stream closed before JSON-RPC response.")
+            parsed = json.loads(data)
+            if not isinstance(parsed, dict):
+                continue
+            if parsed.get("id") == request_id:
+                return parsed
 
 
 class MysqlTopSqlAgent:
