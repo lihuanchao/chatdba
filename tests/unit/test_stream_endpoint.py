@@ -157,6 +157,36 @@ def test_v1_stream_prompts_for_schema_when_route_spans_multiple_instances(monkey
     assert "event: end" in response.text
 
 
+def test_v1_stream_prompts_for_schema_when_join_tables_need_database(monkeypatch):
+    class MultiTableSchemaTaskService:
+        def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+            return OptimizationTaskExecution(
+                task_id="task-join-schema",
+                status=TaskStatus.FAILED,
+                error="SQL 多表关联无法唯一确定数据库，请补充库名后重试：orders, users",
+            )
+
+    monkeypatch.setattr(
+        "chatdba.app.main._build_task_service",
+        lambda: MultiTableSchemaTaskService(),
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/stream",
+        json={"input": "select * from orders join users on orders.user_id = users.id;"},
+    )
+
+    assert response.status_code == 200
+    assert "event: markdown" in response.text
+    assert "请补充数据库库名后继续分析" in response.text
+    assert "orders" in response.text
+    assert "users" in response.text
+    assert "# SQL优化报告" not in response.text
+    assert "需要补充数据库库名" in response.text
+    assert "event: end" in response.text
+
+
 def test_v1_stream_degrades_payload_extraction_failure_to_sse(monkeypatch):
     def broken_extract(payload):
         raise RuntimeError("bad graph payload")

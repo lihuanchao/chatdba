@@ -278,17 +278,23 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
 
 def _append_markdown_chunk(existing: str, chunk: str) -> str:
     if (
-        _is_progress_status_chunk(existing)
+        _ends_with_progress_status(existing)
         and _is_progress_status_chunk(chunk)
-        and
-        existing
-        and existing.endswith("\n")
-        and not existing.endswith("\n\n")
-        and chunk
-        and not chunk.startswith("\n")
     ):
-        return f"{existing}\n{chunk}"
+        return f"{existing.rstrip()} {chunk.lstrip()}"
     return f"{existing}{chunk}"
+
+
+def _ends_with_progress_status(text: str) -> bool:
+    normalized = text.strip()
+    return any(
+        normalized.endswith(status)
+        for status in {
+            "正在解析 SQL...",
+            "已生成诊断结论...",
+            "已生成优化报告...",
+        }
+    )
 
 
 def _is_progress_status_chunk(text: str) -> bool:

@@ -3,6 +3,7 @@ from typing import Protocol
 from pydantic import BaseModel
 
 from chatdba.db.mysql_collector import MysqlTableTarget
+from chatdba.db.route_errors import MULTI_TABLE_SCHEMA_MARKER
 from chatdba.domain.models import EvidenceEnvelope, EvidenceStatus, SourceRoute
 
 
@@ -153,7 +154,8 @@ class MetadataRouter:
         selection = self._select_route_plan(tables, enabled_candidates)
         if selection is None:
             message = (
-                "未找到可同时匹配无库名前缀表的一致库路由信息。"
+                MULTI_TABLE_SCHEMA_MARKER
+                + ", ".join(self._unqualified_table_names(tables))
                 if self._has_common_instance(enabled_candidates)
                 else "SQL 涉及多个源实例，当前无法路由到单一源库执行证据采集。"
             )
@@ -267,6 +269,14 @@ class MetadataRouter:
             if len(route_keys) > 1:
                 ambiguous.append(tables[index].table_name)
         return ambiguous
+
+    def _unqualified_table_names(self, tables: list[MysqlTableTarget]) -> list[str]:
+        names: list[str] = []
+        for table in tables:
+            if table.schema_name or table.table_name in names:
+                continue
+            names.append(table.table_name)
+        return names or ["相关表"]
 
     def _has_common_instance(
         self,

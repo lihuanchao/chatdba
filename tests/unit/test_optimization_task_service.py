@@ -285,6 +285,34 @@ def test_task_service_returns_failed_execution_when_schema_name_is_required():
     ]
 
 
+def test_task_service_returns_failed_execution_when_join_tables_need_schema():
+    def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
+        return {
+            "evidence": EvidenceEnvelope(
+                status=EvidenceStatus.SQL_ONLY,
+                missing_evidence=["route_info", "explain_json", "create_table"],
+                collection_errors=[
+                    "SQL 多表关联无法唯一确定数据库，请补充库名后重试：orders, users"
+                ],
+            )
+        }
+
+    service = OptimizationTaskService(
+        collector=object(),
+        task_runner=fake_runner,
+        task_id_factory=lambda: "task-join-schema",
+    )
+
+    execution = service.run_sql(
+        raw_sql="select * from orders join users on orders.user_id = users.id",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.FAILED
+    assert execution.result is not None
+    assert "请补充库名" in execution.error
+
+
 def test_task_service_returns_failed_execution_when_route_spans_multiple_instances():
     def fake_runner(task_payload, collector, report_composer=None, progress_sink=None):
         return {

@@ -41,7 +41,7 @@ def test_stream_update_buffer_respects_interval_before_forced_flush():
     assert buffer.flush(force=True) == ""
 
 
-def test_stream_update_buffer_separates_progress_lines_with_markdown_paragraphs():
+def test_stream_update_buffer_keeps_sql_progress_statuses_on_one_line():
     buffer = StreamUpdateBuffer(interval_ms=0, clock_ms=lambda: 0)
 
     buffer.add("正在解析 SQL...\n")
@@ -49,8 +49,8 @@ def test_stream_update_buffer_separates_progress_lines_with_markdown_paragraphs(
     buffer.add("已生成优化报告...\n")
 
     assert buffer.flush(force=True) == (
-        "正在解析 SQL...\n\n"
-        "已生成诊断结论...\n\n"
+        "正在解析 SQL... "
+        "已生成诊断结论... "
         "已生成优化报告...\n"
     )
 

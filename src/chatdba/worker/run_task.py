@@ -14,7 +14,7 @@ def run_sql_optimization_task(
     progress_sink: ProgressSink | None = None,
 ) -> dict[str, object]:
     if progress_sink:
-        progress_sink("正在解析 SQL...\n\n")
+        progress_sink("正在解析 SQL... ")
     graph = build_sql_optimization_graph(
         collector=collector,
         report_composer=report_composer,
@@ -22,7 +22,7 @@ def run_sql_optimization_task(
     result = graph.invoke(task_payload)
     if progress_sink:
         if "findings" in result:
-            progress_sink("已生成诊断结论...\n\n")
+            progress_sink("已生成诊断结论... ")
         if "report" in result:
             progress_sink("已生成优化报告...\n\n")
     return result

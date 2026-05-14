@@ -274,7 +274,7 @@ def test_card_streaming_sender_separates_custom_template_chunks_with_paragraph_b
     assert state.card_instance.stream_calls[-1] == (
         "card-progress",
         "content",
-        "已生成诊断结论...\n\n已生成优化报告...\n",
+        "已生成诊断结论... 已生成优化报告...\n",
         False,
         False,
         False,

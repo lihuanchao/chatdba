@@ -57,9 +57,10 @@ def test_run_sql_optimization_task_emits_progress(monkeypatch):
     )
 
     assert result["report"] == {"summary": "ok"}
+    assert "".join(events) == "正在解析 SQL... 已生成诊断结论... 已生成优化报告...\n\n"
     assert events == [
-        "正在解析 SQL...\n\n",
-        "已生成诊断结论...\n\n",
+        "正在解析 SQL... ",
+        "已生成诊断结论... ",
         "已生成优化报告...\n\n",
     ]
 
@@ -86,4 +87,4 @@ def test_run_sql_optimization_task_skips_report_progress_when_graph_stops_early(
     )
 
     assert result == {"evidence": "needs schema"}
-    assert events == ["正在解析 SQL...\n\n"]
+    assert events == ["正在解析 SQL... "]

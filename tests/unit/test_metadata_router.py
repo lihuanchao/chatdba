@@ -381,7 +381,9 @@ def test_router_degrades_when_unqualified_tables_have_no_common_schema():
 
     assert route.status == EvidenceStatus.SQL_ONLY
     assert route.route is None
-    assert "未找到可同时匹配无库名前缀表的一致库路由信息" in route.collection_errors[0]
+    assert "请补充库名" in route.collection_errors[0]
+    assert "orders" in route.collection_errors[0]
+    assert "users" in route.collection_errors[0]
 
 
 def test_router_degrades_when_tables_span_multiple_instances():

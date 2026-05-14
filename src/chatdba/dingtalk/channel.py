@@ -79,13 +79,29 @@ class StreamUpdateBuffer:
 def _join_stream_chunks(chunks: list[str]) -> str:
     output = ""
     for chunk in chunks:
-        if (
-            output
-            and output.endswith("\n")
-            and not output.endswith("\n\n")
-            and chunk
-            and not chunk.startswith("\n")
-        ):
-            output += "\n"
+        if _ends_with_sql_progress_status(output) and _is_sql_progress_status_chunk(chunk):
+            output = f"{output.rstrip()} {chunk.lstrip()}"
+            continue
         output += chunk
     return output
+
+
+def _ends_with_sql_progress_status(text: str) -> bool:
+    normalized = text.strip()
+    return any(
+        normalized.endswith(status)
+        for status in {
+            "正在解析 SQL...",
+            "已生成诊断结论...",
+            "已生成优化报告...",
+        }
+    )
+
+
+def _is_sql_progress_status_chunk(text: str) -> bool:
+    normalized = text.strip()
+    return normalized in {
+        "正在解析 SQL...",
+        "已生成诊断结论...",
+        "已生成优化报告...",
+    }

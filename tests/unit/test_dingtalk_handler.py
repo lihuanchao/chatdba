@@ -234,6 +234,43 @@ class MultiInstanceRouteTaskService:
         )
 
 
+class MultiTableSchemaRouteTaskService:
+    def __init__(self):
+        self.calls = []
+
+    def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+        self.calls.append(raw_sql)
+        if "shop.orders" in raw_sql and "shop.users" in raw_sql:
+            return OptimizationTaskExecution(
+                task_id="task-join-schema-ok",
+                status=TaskStatus.COMPLETED,
+                result={
+                    "report": OptimizationReport.model_validate(
+                        {
+                            "task_id": "task-join-schema-ok",
+                            "summary": "Use an index.",
+                            "confidence": 0.9,
+                            "confidence_label": "high",
+                            "evidence_status": "full",
+                            "missing_evidence": [],
+                            "limitations": [],
+                            "bottlenecks": [],
+                            "sql_rewrites": [],
+                            "index_recommendations": [],
+                            "risks": [],
+                            "validation_steps": [],
+                            "similar_cases": [],
+                        }
+                    )
+                },
+            )
+        return OptimizationTaskExecution(
+            task_id="task-join-schema",
+            status=TaskStatus.FAILED,
+            error="SQL 多表关联无法唯一确定数据库，请补充库名后重试：orders, users",
+        )
+
+
 class SuccessfulFaultTaskService:
     def __init__(self):
         self.calls = []
@@ -462,6 +499,49 @@ def test_handler_reuses_previous_sql_after_multi_instance_route_prompt():
     assert service.calls == [
         "select * from orders",
         "SELECT * FROM shop.orders",
+    ]
+
+
+def test_handler_prompts_for_schema_when_join_tables_cannot_resolve_database():
+    responder = RecordingResponder()
+    service = MultiTableSchemaRouteTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    result = handler.handle(
+        make_message("SQL优化 select * from orders join users on orders.user_id = users.id")
+    )
+
+    assert result.accepted is False
+    assert result.status == TaskStatus.FAILED
+    assert "请补充数据库库名后继续分析" in responder.messages[-1]
+    assert "orders, users" in responder.messages[-1]
+    assert "# SQL优化报告" not in "".join(responder.messages)
+    assert responder.finished[-1] is False
+
+
+def test_handler_reuses_previous_join_sql_after_schema_prompt():
+    responder = RecordingResponder()
+    service = MultiTableSchemaRouteTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    first = handler.handle(
+        make_message("SQL优化 select * from orders join users on orders.user_id = users.id")
+    )
+    second = handler.handle(make_message("shop"))
+
+    assert first.accepted is False
+    assert second.accepted is True
+    assert service.calls == [
+        "select * from orders join users on orders.user_id = users.id",
+        "SELECT * FROM shop.orders JOIN shop.users ON orders.user_id = users.id",
     ]
 
 

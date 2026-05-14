@@ -39,9 +39,9 @@ def test_progress_bridge_flushes_when_interval_elapsed():
     bridge.emit("Parsing SQL\n")
     bridge.emit("Collecting EXPLAIN\n")
 
-    assert responder.messages == ["Parsing SQL\n\nCollecting EXPLAIN\n"]
+    assert responder.messages == ["Parsing SQL\nCollecting EXPLAIN\n"]
     assert [result.message for result in bridge.send_results] == [
-        "Parsing SQL\n\nCollecting EXPLAIN\n"
+        "Parsing SQL\nCollecting EXPLAIN\n"
     ]
 
 

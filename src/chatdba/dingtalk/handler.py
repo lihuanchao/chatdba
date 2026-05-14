@@ -7,7 +7,11 @@ from chatdba.dingtalk.progress import StreamingProgressBridge
 from chatdba.dingtalk.rendering import render_report_for_dingtalk
 from chatdba.dingtalk.responder import DingTalkResponder, DingTalkSendResult
 from chatdba.domain.models import DingTalkContext, TaskStatus
-from chatdba.db.route_errors import AMBIGUOUS_TABLE_MARKER, is_route_resolution_blocker
+from chatdba.db.route_errors import (
+    AMBIGUOUS_TABLE_MARKER,
+    MULTI_TABLE_SCHEMA_MARKER,
+    is_route_resolution_blocker,
+)
 from chatdba.sql.schema_qualification import (
     extract_schema_name_reply,
     unqualified_table_names,
@@ -500,15 +504,17 @@ def _ambiguous_table_names_from_text(text: str) -> list[str]:
     table_names: list[str] = []
     if not is_route_resolution_blocker(text):
         return table_names
-    if AMBIGUOUS_TABLE_MARKER not in text:
+    markers = (AMBIGUOUS_TABLE_MARKER, MULTI_TABLE_SCHEMA_MARKER)
+    if not any(marker in text for marker in markers):
         return ["相关表"]
 
-    for part in text.split(AMBIGUOUS_TABLE_MARKER)[1:]:
-        names_text = part.splitlines()[0]
-        for name in re.split(r"[,，、\s]+", names_text.strip()):
-            cleaned = name.strip("。.;； ")
-            if cleaned and cleaned not in table_names:
-                table_names.append(cleaned)
+    for marker in markers:
+        for part in text.split(marker)[1:]:
+            names_text = part.splitlines()[0]
+            for name in re.split(r"[,，、\s]+", names_text.strip()):
+                cleaned = name.strip("。.;； ")
+                if cleaned and cleaned not in table_names:
+                    table_names.append(cleaned)
     return table_names
 
 
