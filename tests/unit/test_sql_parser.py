@@ -2,6 +2,7 @@ from chatdba.sql.parser import parse_sql_features
 from chatdba.sql.schema_qualification import (
     extract_schema_name_reply,
     qualify_unqualified_tables,
+    unqualified_table_names,
 )
 
 
@@ -48,6 +49,15 @@ def test_qualify_unqualified_tables_adds_schema_to_requested_tables_only():
         "SELECT * FROM crm.orders AS o JOIN shop.users AS u ON o.user_id = u.id "
         "JOIN products AS p ON p.id = o.product_id"
     )
+
+
+def test_unqualified_table_names_returns_all_join_tables_without_schema():
+    names = unqualified_table_names(
+        "select * from orders o join users u on o.user_id = u.id "
+        "join shop.products p on p.id = o.product_id"
+    )
+
+    assert names == ["orders", "users"]
 
 
 def test_extract_schema_name_reply_allows_hyphenated_schema_names():

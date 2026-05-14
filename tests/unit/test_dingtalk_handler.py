@@ -421,6 +421,65 @@ def test_handler_reuses_previous_sql_when_user_replies_with_schema_name():
     ]
 
 
+def test_handler_applies_schema_to_all_join_tables_when_one_table_is_ambiguous():
+    class PartiallyAmbiguousJoinTaskService:
+        def __init__(self):
+            self.calls = []
+
+        def run_sql(self, *, raw_sql, dingtalk_context, progress_sink=None):
+            self.calls.append(raw_sql)
+            if "shop.orders" in raw_sql and "shop.users" in raw_sql:
+                return OptimizationTaskExecution(
+                    task_id="task-partial-join-ok",
+                    status=TaskStatus.COMPLETED,
+                    result={
+                        "report": OptimizationReport.model_validate(
+                            {
+                                "task_id": "task-partial-join-ok",
+                                "summary": "Use an index.",
+                                "confidence": 0.9,
+                                "confidence_label": "high",
+                                "evidence_status": "full",
+                                "missing_evidence": [],
+                                "limitations": [],
+                                "bottlenecks": [],
+                                "sql_rewrites": [],
+                                "index_recommendations": [],
+                                "risks": [],
+                                "validation_steps": [],
+                                "similar_cases": [],
+                            }
+                        )
+                    },
+                )
+            return OptimizationTaskExecution(
+                task_id="task-partial-join",
+                status=TaskStatus.FAILED,
+                error="以下表名在元数据库中存在重复，请补充库名后重试：orders",
+            )
+
+    responder = RecordingResponder()
+    service = PartiallyAmbiguousJoinTaskService()
+    handler = DingTalkSqlOptimizationHandler(
+        task_service=service,
+        responder=responder,
+        stream_interval_ms=1000,
+    )
+
+    first = handler.handle(
+        make_message("SQL优化 select * from orders join users on orders.user_id = users.id")
+    )
+    second = handler.handle(make_message("shop"))
+
+    assert first.accepted is False
+    assert second.accepted is True
+    assert "orders, users" in responder.messages[1]
+    assert service.calls == [
+        "select * from orders join users on orders.user_id = users.id",
+        "SELECT * FROM shop.orders JOIN shop.users ON orders.user_id = users.id",
+    ]
+
+
 def test_handler_quotes_hyphenated_schema_name_when_user_replies_with_schema_name():
     responder = RecordingResponder()
     service = AmbiguousTableTaskService()

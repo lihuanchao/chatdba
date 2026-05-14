@@ -522,7 +522,9 @@ def _table_names_for_pending_schema(
     raw_sql: str,
     route_error_tables: list[str],
 ) -> list[str]:
+    names = unqualified_table_names(raw_sql)
+    if names:
+        return names
     if route_error_tables != ["相关表"]:
         return route_error_tables
-    names = unqualified_table_names(raw_sql)
-    return names or route_error_tables
+    return route_error_tables
