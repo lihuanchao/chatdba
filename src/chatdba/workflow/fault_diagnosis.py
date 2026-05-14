@@ -327,6 +327,11 @@ def _build_report(
         return fallback
     if not markdown:
         return fallback
+    markdown = _append_related_top_sql_section(
+        markdown=markdown,
+        top_sql=top_sql,
+        adjudication=adjudication,
+    )
     markdown = _append_missing_evidence_section(
         markdown=markdown,
         top_sql=top_sql,
@@ -378,6 +383,9 @@ def _fallback_report(
             "【TopSQL发现】",
             _top_sql_markdown(top_sql),
             "",
+            "【相关SQL及初步优化建议】",
+            _related_top_sql_markdown(top_sql=top_sql, adjudication=adjudication),
+            "",
             "【暴露问题】",
             _exposed_problem(top_sql=top_sql, metrics=metrics),
             "",
@@ -395,6 +403,21 @@ def _fallback_report(
         top_sql=top_sql,
         metrics=metrics,
     )
+
+
+def _append_related_top_sql_section(
+    *,
+    markdown: str,
+    top_sql: TopSqlEvidence,
+    adjudication: str,
+) -> str:
+    if not _should_include_related_top_sql(top_sql=top_sql, adjudication=adjudication):
+        return markdown
+    marker = "相关 SQL 及初步优化建议"
+    if marker in markdown or "相关SQL及初步优化建议" in markdown:
+        return markdown
+    section = _related_top_sql_markdown(top_sql=top_sql, adjudication=adjudication)
+    return "\n\n".join([markdown.rstrip(), f"### {marker}", section])
 
 
 def _append_missing_evidence_section(
@@ -471,6 +494,58 @@ def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
     rows.append("")
     rows.append(top_sql.summary or "已获取 TopSQL，请结合执行计划进一步优化。")
     return "\n".join(rows)
+
+
+def _related_top_sql_markdown(*, top_sql: TopSqlEvidence, adjudication: str) -> str:
+    if not _should_include_related_top_sql(top_sql=top_sql, adjudication=adjudication):
+        return "未确认 TopSQL 为主要根因，暂不输出相关 SQL。"
+    records = top_sql.rows[:2]
+    rows = []
+    if len(top_sql.rows) > 2:
+        rows.append("根因不确定或候选 SQL 较多，最多输出 2 条疑似相关 SQL。")
+        rows.append("")
+    for index, record in enumerate(records, start=1):
+        sql = record.sql_text.replace("\n", " ").strip()
+        rows.append(f"{index}. SQL：`{sql}`")
+        rows.append(
+            "   证据："
+            f"数据库 `{record.database or '未知'}`，"
+            f"执行次数 {record.execution_count or 0}，"
+            f"平均执行时间 {record.avg_execution_seconds or 0:g}s，"
+            f"总执行时间 {record.total_execution_seconds or 0:g}s。"
+        )
+        rows.append(f"   初步优化建议：{_top_sql_initial_advice(sql)}")
+    return "\n".join(rows)
+
+
+def _should_include_related_top_sql(
+    *,
+    top_sql: TopSqlEvidence,
+    adjudication: str,
+) -> bool:
+    if top_sql.status != "success" or not top_sql.rows:
+        return False
+    if not adjudication:
+        return True
+    return any(keyword in adjudication for keyword in ("TopSQL", "SQL", "慢 SQL", "长时间运行"))
+
+
+def _top_sql_initial_advice(sql: str) -> str:
+    normalized = sql.lower()
+    advice = ["先执行 EXPLAIN，确认访问类型、扫描行数、是否使用临时表或 filesort。"]
+    if "select *" in normalized:
+        advice.append("避免 `select *`，只返回业务必需列，降低回表和网络传输成本。")
+    if " order by " in normalized:
+        advice.append("检查排序字段是否可与过滤条件组成联合索引，减少 filesort。")
+    if " count(" in normalized:
+        advice.append("核对统计条件字段索引，必要时用覆盖索引降低扫描成本。")
+    if " join " in normalized:
+        advice.append("检查 JOIN 条件两侧字段类型和索引是否一致，避免大表嵌套循环放大。")
+    if " where " in normalized:
+        advice.append("优先评估 WHERE 条件、JOIN 字段、ORDER BY 字段的联合索引。")
+    else:
+        advice.append("缺少过滤条件时，评估是否需要增加时间范围或业务条件限制扫描范围。")
+    return " ".join(advice)
 
 
 def _exposed_problem(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:

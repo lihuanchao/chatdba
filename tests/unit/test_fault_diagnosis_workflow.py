@@ -31,6 +31,40 @@ class FakeTopSqlAgent:
         )
 
 
+class MultiTopSqlAgent:
+    def analyze(self, profile):
+        return TopSqlEvidence(
+            status="success",
+            rows=[
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=120,
+                    avg_execution_seconds=5.2,
+                    total_execution_seconds=624.0,
+                    sql_text=(
+                        "select * from orders where status = ? "
+                        "order by created_at desc limit ?"
+                    ),
+                ),
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=88,
+                    avg_execution_seconds=3.7,
+                    total_execution_seconds=325.6,
+                    sql_text="select count(*) from order_items where order_id = ?",
+                ),
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=50,
+                    avg_execution_seconds=2.9,
+                    total_execution_seconds=145.0,
+                    sql_text="select * from audit_log where tenant_id = ?",
+                ),
+            ],
+            summary="发现多条疑似相关 TopSQL。",
+        )
+
+
 class FakeMetricAgent:
     def __init__(self) -> None:
         self.seen_profile = None
@@ -90,6 +124,15 @@ class SparseReportGateway:
         return "### 模型报告\n已分析。"
 
 
+class SparseTopSqlReportGateway:
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        if "FaultDiagnosisProfile" in system_prompt:
+            raise RuntimeError("use fallback profile")
+        if "根因仲裁结论" in system_prompt:
+            return "监控指标异常与 TopSQL 证据同时存在，疑似 TopSQL 导致数据库高负载。"
+        return "### 模型报告\n已分析。"
+
+
 class FakeCmdbResolver:
     def resolve_by_management_ip(self, management_ip: str):
         if management_ip == "10.187.0.54":
@@ -144,6 +187,34 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "10.186.17.55" in report.markdown
     assert "select * from orders" in report.markdown
     assert "CPU 使用率持续高于 90%" in report.markdown
+    assert "【相关SQL及初步优化建议】" in report.markdown
+    assert "初步优化建议" in report.markdown
+    assert "EXPLAIN" in report.markdown
+
+
+def test_fault_report_limits_related_top_sql_to_two_candidates():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=MultiTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-top-sql-limit",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    related_section = result["report"].markdown.split("【相关SQL及初步优化建议】", 1)[
+        1
+    ].split("【暴露问题】", 1)[0]
+
+    assert "最多输出 2 条" in related_section
+    assert "select * from orders where status" in related_section
+    assert "select count(*) from order_items" in related_section
+    assert "select * from audit_log" not in related_section
 
 
 def test_fault_diagnosis_uses_30_minute_window_before_alert_time():
@@ -268,3 +339,27 @@ def test_fault_report_appends_missing_evidence_when_model_report_omits_it():
     assert "### 证据采集缺口" in report.markdown
     assert "active_threads: 未返回数据" in report.markdown
     assert "performance_schema 连接超时" in report.markdown
+
+
+def test_fault_report_appends_related_top_sql_when_model_report_omits_it():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=SparseTopSqlReportGateway(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-7",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "### 模型报告" in report.markdown
+    assert "### 相关 SQL 及初步优化建议" in report.markdown
+    assert "select * from orders order by created_at desc limit 1000" in report.markdown
+    assert "EXPLAIN" in report.markdown
