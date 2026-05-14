@@ -91,6 +91,31 @@ class RecordingPrometheusClient:
         }
 
 
+class MissingActiveThreadsPrometheusClient(RecordingPrometheusClient):
+    def range_query(self, *, query: str, start: str, end: str, step: str):
+        self.calls.append(
+            {
+                "query": query,
+                "start": start,
+                "end": end,
+                "step": step,
+            }
+        )
+        if "ctg_paas_30202624250003" in query:
+            return {"status": "success", "data": {"result": []}}
+        return {
+            "status": "success",
+            "data": {
+                "result": [
+                    {
+                        "metric": {"ip": "10.186.17.54"},
+                        "values": [[1777528800, "1"]],
+                    }
+                ]
+            },
+        }
+
+
 def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     client = RecordingPrometheusClient()
     agent = PrometheusMetricAgent(client=client, step_seconds=60)
@@ -121,6 +146,23 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     assert client.calls[0]["end"] == "2026-04-30T07:00:00Z"
     assert client.calls[0]["step"] == "60s"
     assert len(client.calls) == 3
+
+
+def test_prometheus_metric_agent_records_missing_metric_when_query_returns_no_data():
+    client = MissingActiveThreadsPrometheusClient()
+    agent = PrometheusMetricAgent(client=client, step_seconds=60)
+
+    evidence = agent.analyze(make_profile())
+
+    assert evidence.status == "success"
+    assert [metric.metric_name for metric in evidence.metrics] == [
+        "cpu_usage",
+        "slow_sql_count",
+    ]
+    assert len(evidence.missing_metrics) == 1
+    assert "active_threads" in evidence.missing_metrics[0]
+    assert "未返回数据" in evidence.missing_metrics[0]
+    assert evidence.error_message == evidence.missing_metrics[0]
 
 
 class FailingPrometheusClient:

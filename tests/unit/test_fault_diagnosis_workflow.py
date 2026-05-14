@@ -54,6 +54,42 @@ class FakeMetricAgent:
         )
 
 
+class PartialMetricAgent:
+    def analyze(self, profile):
+        return MetricEvidence(
+            status="success",
+            metrics=[
+                MetricSeries(
+                    metric_name="cpu_usage",
+                    ip=profile.business_ip or "",
+                    unit="%",
+                    values=[MetricPoint(timestamp=1777527000, value=91.2)],
+                )
+            ],
+            summary="CPU 使用率峰值为 91.2%。",
+            missing_metrics=["active_threads: 未返回数据"],
+            error_message="active_threads: 未返回数据",
+        )
+
+
+class FailingTopSqlAgent:
+    def analyze(self, profile):
+        return TopSqlEvidence(
+            status="failure",
+            rows=[],
+            error_message="performance_schema 连接超时",
+        )
+
+
+class SparseReportGateway:
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        if "FaultDiagnosisProfile" in system_prompt:
+            raise RuntimeError("use fallback profile")
+        if "根因仲裁结论" in system_prompt:
+            return "监控指标异常，但 TopSQL 证据缺失。"
+        return "### 模型报告\n已分析。"
+
+
 class FakeCmdbResolver:
     def resolve_by_management_ip(self, management_ip: str):
         if management_ip == "10.187.0.54":
@@ -164,3 +200,71 @@ def test_fault_diagnosis_extracts_time_and_management_ip_from_real_alert_text():
     assert profile.alert_time == "2026-05-13 09:45:03"
     assert profile.start_time == "2026-05-13 09:15:03"
     assert profile.end_time == "2026-05-13 09:45:03"
+
+
+def test_fault_report_shows_partial_metric_missing_details():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=PartialMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-4",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "部分监控指标未获取到" in report.summary
+    assert "active_threads: 未返回数据" in report.markdown
+    assert "补齐未获取到的监控指标" in report.markdown
+
+
+def test_fault_report_shows_top_sql_failure_reason():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FailingTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-5",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "TopSQL 获取失败" in report.summary
+    assert "performance_schema 连接超时" in report.markdown
+    assert "补齐 TopSQL 采集失败原因" in report.markdown
+
+
+def test_fault_report_appends_missing_evidence_when_model_report_omits_it():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FailingTopSqlAgent(),
+        metric_agent=PartialMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=SparseReportGateway(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-6",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "### 模型报告" in report.markdown
+    assert "### 证据采集缺口" in report.markdown
+    assert "active_threads: 未返回数据" in report.markdown
+    assert "performance_schema 连接超时" in report.markdown

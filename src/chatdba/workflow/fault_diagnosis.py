@@ -327,6 +327,11 @@ def _build_report(
         return fallback
     if not markdown:
         return fallback
+    markdown = _append_missing_evidence_section(
+        markdown=markdown,
+        top_sql=top_sql,
+        metrics=metrics,
+    )
     return fallback.model_copy(update={"markdown": markdown})
 
 
@@ -392,13 +397,39 @@ def _fallback_report(
     )
 
 
+def _append_missing_evidence_section(
+    *,
+    markdown: str,
+    top_sql: TopSqlEvidence,
+    metrics: MetricEvidence,
+) -> str:
+    lines: list[str] = []
+    if top_sql.status != "success":
+        lines.append(f"- TopSQL 获取失败：{top_sql.error_message or 'unknown'}")
+    lines.extend(f"- 监控指标获取不完整：{item}" for item in metrics.missing_metrics)
+    if not lines:
+        return markdown
+    marker = "### 证据采集缺口"
+    if marker in markdown:
+        return markdown
+    return "\n\n".join([markdown.rstrip(), marker, "\n".join(lines)])
+
+
 def _report_summary(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:
     if top_sql.status == "success" and metrics.status == "success":
+        if metrics.missing_metrics:
+            return "已获取 TopSQL 和部分监控指标，但部分监控指标未获取到，风险评估置信度中等。"
         return "监控指标和 TopSQL 均存在有效证据，故障可能已影响数据库响应时间和吞吐。"
     if top_sql.status == "success":
         return "已获取 TopSQL，但缺少监控指标，风险评估置信度中等。"
     if metrics.status == "success":
-        return "已获取监控指标，但缺少 TopSQL，风险评估置信度中等。"
+        top_sql_error = top_sql.error_message or "unknown"
+        if metrics.missing_metrics:
+            return (
+                "TopSQL 获取失败，且部分监控指标未获取到，"
+                f"风险评估置信度中等。TopSQL错误：{top_sql_error}"
+            )
+        return f"TopSQL 获取失败，已获取监控指标，风险评估置信度中等。错误：{top_sql_error}"
     return "证据不足，需补齐 TopSQL 和监控指标后再确认影响范围。"
 
 
@@ -413,6 +444,10 @@ def _metric_markdown(metrics: MetricEvidence) -> str:
         )
     rows.append("")
     rows.append(metrics.summary or "已获取监控指标，请结合趋势继续分析。")
+    if metrics.missing_metrics:
+        rows.append("")
+        rows.append("未获取到的监控指标：")
+        rows.extend(f"- {item}" for item in metrics.missing_metrics)
     return "\n".join(rows)
 
 
@@ -442,8 +477,14 @@ def _exposed_problem(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str
     problems: list[str] = []
     if metrics.status == "success":
         problems.append("监控指标存在异常波动，需要完善阈值、趋势和关联告警。")
+        if metrics.missing_metrics:
+            problems.append("部分监控指标未获取到，需要检查 PromQL、标签映射和数据源可用性。")
     if top_sql.status == "success":
         problems.append("故障窗口存在长时间运行 SQL，需要建立 TopSQL 自动巡检和 SQL 治理闭环。")
+    else:
+        problems.append(
+            f"TopSQL 获取失败：{top_sql.error_message or 'unknown'}，影响 SQL 侧根因判断。"
+        )
     if not problems:
         problems.append("当前缺少关键证据采集能力，需先打通 TopSQL 和监控指标数据源。")
     return "\n".join(f"- {problem}" for problem in problems)
@@ -456,9 +497,15 @@ def _recommendations(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> lis
     if top_sql.status == "success":
         recommendations.append("对 TopSQL 执行 EXPLAIN，结合表结构进一步做 SQL 改写和索引评审。")
     else:
-        recommendations.append("补齐 performance_schema 或慢日志采集权限，确保能查询故障窗口 TopSQL。")
+        recommendations.append(
+            "补齐 TopSQL 采集失败原因，检查 performance_schema 权限、连接账号、网络和故障窗口参数。"
+        )
     if metrics.status == "success":
         recommendations.append("将 CPU、活跃线程数、连接数与 TopSQL 时间线对齐，确认因果关系。")
+        if metrics.missing_metrics:
+            recommendations.append(
+                "补齐未获取到的监控指标，优先核对 PromQL 标签、管理 IP 到业务 IP 映射和 MCP/HTTP 数据源。"
+            )
     else:
         recommendations.append("补齐 Prometheus/MCP 指标查询配置，至少覆盖 CPU、连接数、活跃线程数。")
     return recommendations

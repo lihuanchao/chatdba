@@ -58,6 +58,7 @@ class MetricEvidence(BaseModel):
     agent_type: str = "metric"
     status: str
     metrics: list[MetricSeries] = Field(default_factory=list)
+    missing_metrics: list[str] = Field(default_factory=list)
     summary: str = ""
     error_message: str | None = None
 

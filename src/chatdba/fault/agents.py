@@ -366,6 +366,7 @@ class PrometheusMetricAgent:
         end = _to_prometheus_utc(profile.end_time)
         step = f"{self._step_seconds}s"
         errors: list[str] = []
+        missing_metrics: list[str] = []
         series: list[MetricSeries] = []
         for spec in self._metric_specs(profile):
             collected = self._query_metric_spec(
@@ -374,6 +375,7 @@ class PrometheusMetricAgent:
                 end=end,
                 step=step,
                 errors=errors,
+                missing_metrics=missing_metrics,
             )
             series.extend(collected)
 
@@ -381,13 +383,17 @@ class PrometheusMetricAgent:
             return MetricEvidence(
                 status="failure",
                 metrics=[],
-                error_message=" | ".join(errors) or "prometheus_query_failed",
+                missing_metrics=missing_metrics,
+                error_message=" | ".join(errors or missing_metrics)
+                or "prometheus_query_failed",
             )
 
         return MetricEvidence(
             status="success",
             metrics=series,
+            missing_metrics=missing_metrics,
             summary=_metric_summary(series),
+            error_message=" | ".join(missing_metrics) if missing_metrics else None,
         )
 
     def _metric_specs(self, profile: FaultDiagnosisProfile) -> list[dict[str, str]]:
@@ -432,7 +438,10 @@ class PrometheusMetricAgent:
         end: str,
         step: str,
         errors: list[str],
+        missing_metrics: list[str],
     ) -> list[MetricSeries]:
+        last_errors: list[str] = []
+        empty_result_seen = False
         for candidate in self._clients_in_order():
             try:
                 payload = candidate.range_query(
@@ -441,17 +450,25 @@ class PrometheusMetricAgent:
                     end=end,
                     step=step,
                 )
-                return _metric_series_from_payload(
+                result = _metric_series_from_payload(
                     payload,
                     metric_name=spec["metric_name"],
                     default_ip=spec["default_ip"],
                     unit=spec["unit"],
                 )
-            except Exception as exc:
-                errors.append(
-                    f"{spec['metric_name']}: {str(exc) or exc.__class__.__name__}"
-                )
+                if result:
+                    return result
+                empty_result_seen = True
                 continue
+            except Exception as exc:
+                last_errors.append(str(exc) or exc.__class__.__name__)
+                continue
+        reason = "; ".join(last_errors)
+        if empty_result_seen:
+            reason = f"未返回数据{'; ' + reason if reason else ''}"
+        message = f"{spec['metric_name']}: {reason or '未返回数据'}"
+        errors.append(message)
+        missing_metrics.append(message)
         return []
 
     def _clients_in_order(self) -> list[PrometheusRangeClient]:
