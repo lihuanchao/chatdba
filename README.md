@@ -456,7 +456,7 @@ ALARM_DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx
 构建和启动：
 
 ```bash
-docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml build api
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -541,5 +541,5 @@ Docker 构建无法拉取 `python:3.11-slim`
 这是 Docker registry 或 DNS 问题，不是项目代码问题。修复镜像源或 DNS 后重新执行：
 
 ```bash
-docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml build api
 ```

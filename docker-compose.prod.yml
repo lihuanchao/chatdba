@@ -25,9 +25,6 @@ services:
 
   dingtalk:
     image: chatdba:prod
-    build:
-      context: .
-      dockerfile: Dockerfile
     env_file:
       - .env.prod
     restart: unless-stopped
@@ -35,9 +32,6 @@ services:
 
   alarm-binlog:
     image: chatdba:prod
-    build:
-      context: .
-      dockerfile: Dockerfile
     env_file:
       - .env.prod
     volumes:
