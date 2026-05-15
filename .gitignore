@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 .env
 chatdba-venv/
+alarm_dify_dd/

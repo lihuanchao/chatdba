@@ -239,6 +239,42 @@ ts_min = alert_time - 30 minutes
 ts_max = alert_time
 ```
 
+## Alarm Binlog Fault Diagnosis Trigger
+
+ChatDBA can also trigger fault diagnosis from MySQL binlog inserts on the alarm
+table and push the generated report to one fixed DingTalk group robot webhook.
+
+Start the worker with:
+
+```bash
+chatdba-alarm-binlog
+```
+
+Required alarm-binlog settings:
+
+```text
+ALARM_MYSQL_HOST=
+ALARM_MYSQL_PORT=3306
+ALARM_MYSQL_USER=
+ALARM_MYSQL_PASSWORD=
+ALARM_MYSQL_DATABASE=syalarm_new
+ALARM_MYSQL_TABLE=aps_alarm_record
+ALARM_MYSQL_SERVER_ID=5011
+ALARM_FILTER_SYS_CODE=database_prod
+ALARM_FILTER_EVENT_CODES=1222,1654
+ALARM_CHECKPOINT_FILE=/tmp/chatdba-alarm-checkpoint.json
+ALARM_DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx
+```
+
+Runtime behavior:
+
+- Listens for `WriteRowsEvent` inserts and extracts `main_record_id`, `alarm_content`, `sys_code`, and `event_code`.
+- Filters by `ALARM_FILTER_SYS_CODE` and `ALARM_FILTER_EVENT_CODES`.
+- Anchors to current `MAX(main_record_id)` on startup, so it only handles new alarms after the worker starts.
+- Runs the existing smart fault diagnosis workflow with `alarm_content`.
+- Sends the final Markdown report to `ALARM_DINGTALK_WEBHOOK_URL`.
+- Saves checkpoint only after diagnosis and webhook delivery both succeed.
+
 The real Prometheus MCP integration test is opt-in because it hits the configured
 SSE endpoint:
 

@@ -51,7 +51,12 @@ class FakePymysqlModule:
 
 
 def test_settings_expose_fault_diagnosis_data_source_options():
-    settings = Settings(database_url="postgresql://chatdba:test@localhost/chatdba")
+    settings = Settings(
+        database_url="postgresql://chatdba:test@localhost/chatdba",
+        fault_cmdb_table="cmd_hosts",
+        fault_prometheus_base_url="",
+        fault_metric_step_seconds=60,
+    )
 
     assert settings.fault_top_sql_port == 8801
     assert settings.fault_top_sql_database == "performance_schema"
