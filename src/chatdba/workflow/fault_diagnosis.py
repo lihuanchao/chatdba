@@ -47,6 +47,26 @@ class FaultDiagnosisState(TypedDict, total=False):
     report: FaultDiagnosisReport
 
 
+FAULT_REPORT_SYSTEM_PROMPT = """你是数据库AIOps根因分析运营专家，请基于输入证据输出中文 Markdown 故障诊断报告，禁止编造数据。
+
+输出格式必须稳定，且只能输出以下四个一级章节：
+### 一、问题简述
+### 二、影响概述
+### 三、问题原因
+### 四、问题分析及优化建议
+
+章节约束：
+- “### 一、问题简述”必须包含报告生成时间、故障窗口、系统名、管理 IP、业务 IP 和原始告警摘要。
+- “### 二、影响概述”只输出故障影响时间和风险评估，内容要精简。
+- “### 三、问题原因”只输出原因分类和原因概述，根因结论保持短句。
+- “### 四、问题分析及优化建议”只包含“【监控发现】”和“【TopSQL发现】”两部分。
+
+禁止输出任何附录、数据来源说明、关键数据摘要、证据摘要、相关 SQL 及初步优化建议、验证步骤、风险提示、任务 ID。
+不要新增第五、六、七等额外章节；不要输出“监控指标峰值 / TopSQL（前5条）”这类附录表格。
+如果缺少证据，只在已有四个章节内说明，不要单独新增章节。
+"""
+
+
 class EmptyTopSqlAgent:
     def analyze(self, profile: FaultDiagnosisProfile) -> TopSqlEvidence:
         return TopSqlEvidence(
@@ -323,7 +343,7 @@ def _build_report(
     )
     try:
         markdown = qwen_gateway.generate_report(
-            "你是数据库AIOps根因分析运营专家，请输出中文 Markdown 故障诊断报告，禁止编造数据。",
+            FAULT_REPORT_SYSTEM_PROMPT,
             user_prompt,
         ).strip()
     except Exception:
@@ -439,17 +459,34 @@ def _report_section_title(line: str) -> str | None:
         return None
     markdown_heading = re.match(r"^#{1,6}\s*(?P<title>.+?)\s*$", stripped)
     if markdown_heading:
-        return markdown_heading.group("title").strip()
+        return _strip_section_number(markdown_heading.group("title").strip())
     plain_heading = re.match(
         r"^(?:[一二三四五六七八九十]+|[0-9]+)[、.．]\s*(?P<title>.+?)\s*$",
         stripped,
     )
     if plain_heading:
-        return plain_heading.group("title").strip()
+        return _strip_section_number(plain_heading.group("title").strip())
     bracket_heading = re.match(r"^【(?P<title>.+?)】\s*$", stripped)
     if bracket_heading:
-        return bracket_heading.group("title").strip()
+        return _strip_section_number(bracket_heading.group("title").strip())
+    title = _strip_section_number(stripped)
+    if _is_removed_report_section_title(title):
+        return title
     return None
+
+
+def _strip_section_number(title: str) -> str:
+    current = title.strip()
+    while True:
+        stripped = re.sub(
+            r"^(?:[一二三四五六七八九十]+|[0-9]+)[、.．]\s*",
+            "",
+            current,
+            count=1,
+        ).strip()
+        if stripped == current:
+            return current
+        current = stripped
 
 
 def _is_removed_report_section_title(title: str) -> bool:

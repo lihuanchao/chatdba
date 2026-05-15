@@ -192,6 +192,37 @@ class AppendixReportGateway:
         )
 
 
+class MarkdownNumberedAppendixReportGateway:
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        if "FaultDiagnosisProfile" in system_prompt:
+            raise RuntimeError("use fallback profile")
+        if "根因仲裁结论" in system_prompt:
+            return "监控指标异常与 TopSQL 证据同时存在，疑似 TopSQL 导致数据库高负载。"
+        return (
+            "### 一、问题简述\n"
+            "数据库 CPU 异常。\n\n"
+            "### 四、问题分析及优化建议\n"
+            "TopSQL 分析：存在高耗时 SQL。\n\n"
+            "### 六、附录：关键数据摘要\n"
+            "| 监控指标峰值 | TopSQL（前5条） |\n"
+            "| --- | --- |\n"
+            "| CPU 95% | select * from orders |\n"
+        )
+
+
+class CapturingReportPromptGateway:
+    def __init__(self) -> None:
+        self.report_system_prompt = ""
+
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        if "FaultDiagnosisProfile" in system_prompt:
+            raise RuntimeError("use fallback profile")
+        if "根因仲裁结论" in system_prompt:
+            return "监控指标异常与 TopSQL 证据同时存在，疑似 TopSQL 导致数据库高负载。"
+        self.report_system_prompt = system_prompt
+        return "### 一、问题简述\n数据库 CPU 异常。"
+
+
 class FakeCmdbResolver:
     def resolve_by_management_ip(self, management_ip: str):
         if management_ip == "10.187.0.54":
@@ -486,3 +517,60 @@ def test_fault_report_strips_plain_text_appendix_data_source_section_from_model_
     assert "数据来源说明" not in report.markdown
     assert "监控指标：来自业务 IP" not in report.markdown
     assert "CMDB 映射" not in report.markdown
+
+
+def test_fault_report_strips_markdown_numbered_appendix_summary_section_from_model_report():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=MarkdownNumberedAppendixReportGateway(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-9",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "### 一、问题简述" in report.markdown
+    assert "### 四、问题分析及优化建议" in report.markdown
+    assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
+    assert "附录" not in report.markdown
+    assert "关键数据摘要" not in report.markdown
+    assert "监控指标峰值" not in report.markdown
+    assert "TopSQL（前5条）" not in report.markdown
+
+
+def test_fault_report_prompt_restricts_model_to_fixed_sections_and_bans_appendix():
+    gateway = CapturingReportPromptGateway()
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=gateway,
+    )
+
+    graph.invoke(
+        {
+            "task_id": "fault-10",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    prompt = gateway.report_system_prompt
+
+    assert "只能输出以下四个一级章节" in prompt
+    assert "### 一、问题简述" in prompt
+    assert "### 二、影响概述" in prompt
+    assert "### 三、问题原因" in prompt
+    assert "### 四、问题分析及优化建议" in prompt
+    assert "禁止输出任何附录" in prompt
+    assert "数据来源说明" in prompt
+    assert "关键数据摘要" in prompt
+    assert "相关 SQL 及初步优化建议" in prompt
