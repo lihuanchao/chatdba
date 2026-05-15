@@ -183,7 +183,7 @@ class AppendixReportGateway:
         return (
             "### 一、问题简述\n"
             "数据库 CPU 异常。\n\n"
-            "### 四、问题分析及优化建议\n"
+            "### 四、问题分析\n"
             "TopSQL 分析：存在高耗时 SQL。\n\n"
             "五、附录：数据来源说明\n"
             "监控指标：来自业务 IP 10.186.21.61 的 CPU 使用率。\n"
@@ -201,7 +201,7 @@ class MarkdownNumberedAppendixReportGateway:
         return (
             "### 一、问题简述\n"
             "数据库 CPU 异常。\n\n"
-            "### 四、问题分析及优化建议\n"
+            "### 四、问题分析\n"
             "TopSQL 分析：存在高耗时 SQL。\n\n"
             "### 六、附录：关键数据摘要\n"
             "| 监控指标峰值 | TopSQL（前5条） |\n"
@@ -288,7 +288,7 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert report.markdown.count("监控指标异常与 TopSQL 证据同时存在") == 1
 
 
-def test_fault_report_limits_top_sql_analysis_to_five_rows_without_related_sql_section():
+def test_fault_report_lists_two_top_sql_rows_and_separates_analysis_from_recommendations():
     graph = build_fault_diagnosis_graph(
         top_sql_agent=MultiTopSqlAgent(),
         metric_agent=FakeMetricAgent(),
@@ -307,13 +307,17 @@ def test_fault_report_limits_top_sql_analysis_to_five_rows_without_related_sql_s
 
     assert "【相关SQL及初步优化建议】" not in markdown
     assert "### 相关 SQL 及初步优化建议" not in markdown
+    assert "### 四、问题分析" in markdown
+    assert "### 五、优化建议" in markdown
     assert "select * from orders where status" in markdown
     assert "select count(*) from order_items" in markdown
-    assert "select * from audit_log" in markdown
-    assert "select * from shipments" in markdown
-    assert "select * from payments" in markdown
+    assert "select * from audit_log" not in markdown
+    assert "select * from shipments" not in markdown
+    assert "select * from payments" not in markdown
     assert "select * from inventory" not in markdown
-    assert "TopSQL 分析：共获取 6 条，展示前 5 条" in markdown
+    assert "TopSQL 分析：共获取 6 条，展示前 2 条" in markdown
+    assert "执行 EXPLAIN 确认扫描行数和 filesort" in markdown
+    assert "执行 EXPLAIN 确认扫描行数；优先评估统计条件字段的覆盖索引" in markdown
 
 
 def test_fault_report_formats_sql_with_backticks_as_markdown_code():
@@ -511,7 +515,7 @@ def test_fault_report_strips_plain_text_appendix_data_source_section_from_model_
     report = result["report"]
 
     assert "### 一、问题简述" in report.markdown
-    assert "### 四、问题分析及优化建议" in report.markdown
+    assert "### 四、问题分析" in report.markdown
     assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
     assert "附录" not in report.markdown
     assert "数据来源说明" not in report.markdown
@@ -538,7 +542,7 @@ def test_fault_report_strips_markdown_numbered_appendix_summary_section_from_mod
     report = result["report"]
 
     assert "### 一、问题简述" in report.markdown
-    assert "### 四、问题分析及优化建议" in report.markdown
+    assert "### 四、问题分析" in report.markdown
     assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
     assert "附录" not in report.markdown
     assert "关键数据摘要" not in report.markdown
@@ -565,11 +569,12 @@ def test_fault_report_prompt_restricts_model_to_fixed_sections_and_bans_appendix
 
     prompt = gateway.report_system_prompt
 
-    assert "只能输出以下四个一级章节" in prompt
+    assert "只能输出以下五个一级章节" in prompt
     assert "### 一、问题简述" in prompt
     assert "### 二、影响概述" in prompt
     assert "### 三、问题原因" in prompt
-    assert "### 四、问题分析及优化建议" in prompt
+    assert "### 四、问题分析" in prompt
+    assert "### 五、优化建议" in prompt
     assert "禁止输出任何附录" in prompt
     assert "数据来源说明" in prompt
     assert "关键数据摘要" in prompt

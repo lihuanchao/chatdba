@@ -300,7 +300,11 @@ class SuccessfulFaultTaskService:
                 "report": FaultDiagnosisReport(
                     task_id="fault-1",
                     summary="CPU 高",
-                    markdown="### 一、问题简述\n订单系统 CPU 高\n\n### 四、问题分析及优化建议\n建议优化 TopSQL",
+                    markdown=(
+                        "### 一、问题简述\n订单系统 CPU 高\n\n"
+                        "### 四、问题分析\nTopSQL 分析\n\n"
+                        "### 五、优化建议\n建议优化 TopSQL"
+                    ),
                     root_cause="TopSQL 导致 CPU 高",
                     recommendations=["优化 TopSQL"],
                     profile=profile,
@@ -673,7 +677,8 @@ def test_fault_handler_runs_diagnosis_and_streams_markdown_report():
     assert "正在获取 TopSQL..." not in full_stream_text
     assert "正在获取监控指标..." not in full_stream_text
     assert "### 一、问题简述" in full_stream_text
-    assert "### 四、问题分析及优化建议" in full_stream_text
+    assert "### 四、问题分析" in full_stream_text
+    assert "### 五、优化建议" in full_stream_text
 
 
 def test_chatdba_handler_routes_fault_prefix_to_fault_handler():

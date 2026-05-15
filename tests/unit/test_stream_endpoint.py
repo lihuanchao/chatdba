@@ -319,7 +319,9 @@ def test_v1_stream_routes_fault_diagnosis_prefix_to_fault_service(monkeypatch):
                     "markdown": (
                         "### 一、问题简述\n"
                         "订单系统 CPU 高\n\n"
-                        "### 四、问题分析及优化建议\n"
+                        "### 四、问题分析\n"
+                        "TopSQL 分析\n\n"
+                        "### 五、优化建议\n"
                         "优化 TopSQL"
                     )
                 },

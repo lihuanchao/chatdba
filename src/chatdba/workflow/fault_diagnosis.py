@@ -49,21 +49,23 @@ class FaultDiagnosisState(TypedDict, total=False):
 
 FAULT_REPORT_SYSTEM_PROMPT = """你是数据库AIOps根因分析运营专家，请基于输入证据输出中文 Markdown 故障诊断报告，禁止编造数据。
 
-输出格式必须稳定，且只能输出以下四个一级章节：
+输出格式必须稳定，且只能输出以下五个一级章节：
 ### 一、问题简述
 ### 二、影响概述
 ### 三、问题原因
-### 四、问题分析及优化建议
+### 四、问题分析
+### 五、优化建议
 
 章节约束：
 - “### 一、问题简述”必须包含报告生成时间、故障窗口、系统名、管理 IP、业务 IP 和原始告警摘要。
 - “### 二、影响概述”只输出故障影响时间和风险评估，内容要精简。
 - “### 三、问题原因”只输出原因分类和原因概述，根因结论保持短句。
-- “### 四、问题分析及优化建议”只包含“【监控发现】”和“【TopSQL发现】”两部分。
+- “### 四、问题分析”只包含“【监控发现】”和“【TopSQL发现】”两部分；TopSQL 发现最多列出 2 条 TopSQL。
+- “### 五、优化建议”必须基于列出的 TopSQL 给出初步优化建议；不确定时最多针对 2 条 TopSQL 输出建议。
 
 禁止输出任何附录、数据来源说明、关键数据摘要、证据摘要、相关 SQL 及初步优化建议、验证步骤、风险提示、任务 ID。
-不要新增第五、六、七等额外章节；不要输出“监控指标峰值 / TopSQL（前5条）”这类附录表格。
-如果缺少证据，只在已有四个章节内说明，不要单独新增章节。
+不要新增第六、七等额外章节；不要输出“监控指标峰值 / TopSQL（前5条）”这类附录表格。
+如果缺少证据，只在已有五个章节内说明，不要单独新增章节。
 """
 
 
@@ -399,12 +401,15 @@ def _fallback_report(
             "【原因分类】数据库性能 / 资源负载 / SQL 执行",
             f"【原因概述】{root_cause}",
             "",
-            "### 四、问题分析及优化建议",
+            "### 四、问题分析",
             "【监控发现】",
             _metric_markdown(metrics),
             "",
             "【TopSQL发现】",
             _top_sql_markdown(top_sql),
+            "",
+            "### 五、优化建议",
+            _top_sql_recommendation_markdown(top_sql),
         ]
     )
     return FaultDiagnosisReport(
@@ -556,7 +561,7 @@ def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
         "| 数据库 | 执行次数 | 平均执行时间(s) | 总执行时间(s) | SQL摘要 |",
         "| --- | ---: | ---: | ---: | --- |",
     ]
-    shown_count = min(len(top_sql.rows), 5)
+    shown_count = min(len(top_sql.rows), 2)
     for record in top_sql.rows[:shown_count]:
         sql = _normalize_sql_text(record.sql_text)
         rows.append(
@@ -570,6 +575,29 @@ def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
     rows.append("")
     rows.append(f"TopSQL 分析：共获取 {len(top_sql.rows)} 条，展示前 {shown_count} 条。")
     return "\n".join(rows)
+
+
+def _top_sql_recommendation_markdown(top_sql: TopSqlEvidence) -> str:
+    if top_sql.status != "success" or not top_sql.rows:
+        return f"- TopSQL 获取失败，暂无法给出 SQL 侧优化建议：{top_sql.error_message or 'unknown'}"
+    rows: list[str] = []
+    for index, record in enumerate(top_sql.rows[:2], start=1):
+        sql = _normalize_sql_text(record.sql_text)
+        rows.append(f"{index}. {_inline_code(sql)}：{_top_sql_initial_advice(sql)}")
+    return "\n".join(rows)
+
+
+def _top_sql_initial_advice(sql: str) -> str:
+    normalized = sql.lower()
+    if " order by " in normalized:
+        return "执行 EXPLAIN 确认扫描行数和 filesort；优先评估 ORDER BY 与过滤条件的联合索引。"
+    if " join " in normalized:
+        return "执行 EXPLAIN 确认 JOIN 顺序和扫描行数；优先核对 JOIN 字段类型和索引。"
+    if " count(" in normalized:
+        return "执行 EXPLAIN 确认扫描行数；优先评估统计条件字段的覆盖索引。"
+    if " where " in normalized:
+        return "执行 EXPLAIN 确认访问类型和扫描行数；优先评估过滤条件字段索引。"
+    return "执行 EXPLAIN 确认访问类型和扫描行数；优先补充过滤条件或限制扫描范围。"
 
 
 def _normalize_sql_text(sql: str) -> str:
