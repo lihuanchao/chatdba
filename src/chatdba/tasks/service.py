@@ -111,7 +111,14 @@ class OptimizationTaskService:
                     task_id=request.task_id,
                     status=TaskStatus.FAILED,
                     message=f"任务执行失败：{error}",
-                    payload={"error": error},
+                    payload={
+                        **_event_payload(
+                            task_type="sql_optimization",
+                            stage="failed",
+                            status=TaskStatus.FAILED,
+                        ),
+                        "error": error,
+                    },
                 )
             )
             return OptimizationTaskExecution(
@@ -130,6 +137,14 @@ class OptimizationTaskService:
                     task_id=request.task_id,
                     status=TaskStatus.FAILED,
                     message=missing_schema_error,
+                    payload={
+                        **_event_payload(
+                            task_type="sql_optimization",
+                            stage="failed",
+                            status=TaskStatus.FAILED,
+                        ),
+                        "error": missing_schema_error,
+                    },
                 )
             )
             return OptimizationTaskExecution(
@@ -143,6 +158,14 @@ class OptimizationTaskService:
                 task_id=request.task_id,
                 status=TaskStatus.COMPLETED,
                 message="任务执行完成",
+                payload={
+                    **_event_payload(
+                        task_type="sql_optimization",
+                        stage="completed",
+                        status=TaskStatus.COMPLETED,
+                    ),
+                    "result_keys": sorted(str(key) for key in result.keys()),
+                },
             )
         )
         return OptimizationTaskExecution(
@@ -180,6 +203,15 @@ class OptimizationTaskService:
                     task_id=request.task_id,
                     status=TaskStatus.RECEIVED,
                     message="任务已接收",
+                    payload={
+                        **_event_payload(
+                            task_type="sql_optimization",
+                            stage="received",
+                            status=TaskStatus.RECEIVED,
+                        ),
+                        "schema_name": request.schema_name,
+                        "sql_length": len(request.raw_sql),
+                    },
                 )
             )
         except Exception:
@@ -205,6 +237,11 @@ class OptimizationTaskService:
                     task_id=task_id,
                     status=status,
                     message=message.strip(),
+                    payload=_event_payload(
+                        task_type="sql_optimization",
+                        stage=status.value,
+                        status=status,
+                    ),
                 )
             )
 
@@ -278,6 +315,19 @@ def _status_for_progress_message(message: str) -> TaskStatus | None:
         "已生成优化报告...": TaskStatus.GENERATING_REPORT,
     }
     return mapping.get(normalized)
+
+
+def _event_payload(
+    *,
+    task_type: str,
+    stage: str,
+    status: TaskStatus,
+) -> dict[str, object]:
+    return {
+        "task_type": task_type,
+        "stage": stage,
+        "status": status.value,
+    }
 
 
 def _case_retrieval_debug_payload(

@@ -168,6 +168,14 @@ def test_fault_diagnosis_task_service_records_events_and_token_usage():
         TaskStatus.DIAGNOSING,
         TaskStatus.COMPLETED,
     ]
+    assert [event.payload["stage"] for event in repository.events] == [
+        "received",
+        "diagnosing",
+        "completed",
+    ]
+    assert all(event.payload["task_type"] == "fault_diagnosis" for event in repository.events)
+    assert repository.events[0].payload["input_length"] == len("订单系统 CPU 高")
+    assert repository.events[-1].payload["result_keys"] == ["report"]
     assert len(repository.token_usages) == 1
     assert repository.token_usages[0].task_id == "fault-task-usage"
     assert repository.token_usages[0].total_tokens == 120
@@ -194,4 +202,9 @@ def test_fault_diagnosis_task_service_records_failed_event_on_error():
         TaskStatus.RECEIVED,
         TaskStatus.FAILED,
     ]
-    assert repository.events[-1].payload == {"error": "metric unavailable"}
+    assert repository.events[-1].payload == {
+        "task_type": "fault_diagnosis",
+        "stage": "failed",
+        "status": "failed",
+        "error": "metric unavailable",
+    }

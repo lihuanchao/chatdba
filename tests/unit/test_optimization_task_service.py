@@ -153,6 +153,16 @@ def test_task_service_persists_task_and_progress_events():
         TaskStatus.GENERATING_REPORT,
         TaskStatus.COMPLETED,
     ]
+    assert [event.payload["stage"] for event in repository.events] == [
+        "received",
+        "parsing_sql",
+        "diagnosing",
+        "generating_report",
+        "completed",
+    ]
+    assert all(event.payload["task_type"] == "sql_optimization" for event in repository.events)
+    assert repository.events[0].payload["schema_name"] is None
+    assert repository.events[-1].payload["result_keys"] == ["report"]
 
 
 def test_task_service_persists_case_retrieval_debug_event_after_success():

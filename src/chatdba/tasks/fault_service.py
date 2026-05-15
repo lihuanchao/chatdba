@@ -88,7 +88,14 @@ class FaultDiagnosisTaskService:
                     task_id=request.task_id,
                     status=TaskStatus.FAILED,
                     message=f"故障诊断任务执行失败：{error}",
-                    payload={"error": error},
+                    payload={
+                        **_event_payload(
+                            task_type="fault_diagnosis",
+                            stage="failed",
+                            status=TaskStatus.FAILED,
+                        ),
+                        "error": error,
+                    },
                 )
             )
             return OptimizationTaskExecution(
@@ -104,6 +111,14 @@ class FaultDiagnosisTaskService:
                 task_id=request.task_id,
                 status=TaskStatus.COMPLETED,
                 message="故障诊断任务执行完成",
+                payload={
+                    **_event_payload(
+                        task_type="fault_diagnosis",
+                        stage="completed",
+                        status=TaskStatus.COMPLETED,
+                    ),
+                    "result_keys": sorted(str(key) for key in result.keys()),
+                },
             )
         )
         return OptimizationTaskExecution(
@@ -127,6 +142,14 @@ class FaultDiagnosisTaskService:
                     task_id=request.task_id,
                     status=TaskStatus.RECEIVED,
                     message="故障诊断任务已接收",
+                    payload={
+                        **_event_payload(
+                            task_type="fault_diagnosis",
+                            stage="received",
+                            status=TaskStatus.RECEIVED,
+                        ),
+                        "input_length": len(request.input_text),
+                    },
                 )
             )
         except Exception:
@@ -152,6 +175,11 @@ class FaultDiagnosisTaskService:
                     task_id=task_id,
                     status=status,
                     message=message.strip(),
+                    payload=_event_payload(
+                        task_type="fault_diagnosis",
+                        stage=status.value,
+                        status=status,
+                    ),
                 )
             )
 
@@ -213,3 +241,16 @@ def _status_for_fault_progress_message(message: str) -> TaskStatus | None:
     if "解析故障信息" in normalized or "TopSQL" in normalized or "监控指标" in normalized:
         return TaskStatus.DIAGNOSING
     return None
+
+
+def _event_payload(
+    *,
+    task_type: str,
+    stage: str,
+    status: TaskStatus,
+) -> dict[str, object]:
+    return {
+        "task_type": task_type,
+        "stage": stage,
+        "status": status.value,
+    }
