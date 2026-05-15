@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__
+*.py[cod]
+*.egg-info
+chatdba-venv
+.worktrees
+alarm_dify_dd
+data
+logs
+*.log

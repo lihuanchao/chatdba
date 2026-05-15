@@ -49,6 +49,76 @@ PYTHON_BIN=/path/to/venv/bin/python ./scripts/run-local-checks.sh
 uvicorn chatdba.app.main:app --reload
 ```
 
+## Production Docker Deployment
+
+ChatDBA provides a production compose file that builds one application image and
+starts three processes from that image:
+
+- `api`: FastAPI service on port `8000`.
+- `dingtalk`: DingTalk Stream conversation worker.
+- `alarm-binlog`: MySQL binlog alarm trigger worker.
+
+Prepare a production env file from the example:
+
+```bash
+cp .env.example .env.prod
+```
+
+Update `.env.prod` with production values. Do not commit `.env.prod`.
+
+Important production settings:
+
+```text
+DATABASE_URL=postgresql+asyncpg://user:password@postgres-host:5432/chatdba
+POSTGRES_MIGRATION_URL=postgresql://user:password@postgres-host:5432/chatdba
+REDIS_URL=redis://redis-host:6379/0
+QWEN_API_KEY=replace-with-dashscope-api-key
+DINGTALK_STREAM_ENABLED=true
+DINGTALK_CLIENT_ID=replace-with-client-id
+DINGTALK_CLIENT_SECRET=replace-with-client-secret
+METADATA_MYSQL_HOST=metadata-mysql-host
+FAULT_TOP_SQL_USER=top-sql-user
+FAULT_TOP_SQL_PASSWORD=top-sql-password
+FAULT_PROMETHEUS_MCP_SSE_URL=http://prometheus-mcp-host:8080/sse
+ALARM_MYSQL_HOST=alarm-mysql-host
+ALARM_MYSQL_USER=alarm-binlog-user
+ALARM_MYSQL_PASSWORD=alarm-binlog-password
+ALARM_CHECKPOINT_FILE=/data/chatdba/alarm-checkpoint.json
+ALARM_DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx
+```
+
+Create the host directory used by the alarm checkpoint:
+
+```bash
+mkdir -p data
+```
+
+Build and start:
+
+```bash
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Check logs:
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f dingtalk
+docker compose -f docker-compose.prod.yml logs -f alarm-binlog
+```
+
+Initialize or upgrade PostgreSQL schema before serving real traffic:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm api \
+  sh -c 'psql "$POSTGRES_MIGRATION_URL" -f migrations/001_initial.sql && psql "$POSTGRES_MIGRATION_URL" -f migrations/002_agent_token_usage.sql'
+```
+
+The `alarm-binlog` service requires MySQL binlog access. The alarm MySQL server
+must use row-based binlog events, and `ALARM_MYSQL_USER` needs permissions for
+table reads plus replication stream access.
+
 6. Optional: backfill case embeddings for pgvector retrieval:
 
 ```bash

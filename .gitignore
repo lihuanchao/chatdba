@@ -3,5 +3,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .env
+.env.*
+!.env.example
 chatdba-venv/
 alarm_dify_dd/
