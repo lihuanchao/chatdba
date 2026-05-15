@@ -419,25 +419,46 @@ def _ensure_report_generated_time(
 
 
 def _strip_removed_report_sections(markdown: str) -> str:
-    removed_titles = (
-        "相关 SQL 及初步优化建议",
-        "相关SQL及初步优化建议",
-        "附录：关键数据摘要",
-        "附录: 关键数据摘要",
-    )
     lines = markdown.splitlines()
     kept: list[str] = []
     skipping = False
     for line in lines:
-        heading = re.match(r"^#{1,6}\s*(?P<title>.+?)\s*$", line.strip())
-        if heading:
-            title = heading.group("title")
-            skipping = any(title.startswith(removed) for removed in removed_titles)
+        title = _report_section_title(line)
+        if title:
+            skipping = _is_removed_report_section_title(title)
             if skipping:
                 continue
         if not skipping:
             kept.append(line)
     return "\n".join(kept).strip()
+
+
+def _report_section_title(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+    markdown_heading = re.match(r"^#{1,6}\s*(?P<title>.+?)\s*$", stripped)
+    if markdown_heading:
+        return markdown_heading.group("title").strip()
+    plain_heading = re.match(
+        r"^(?:[一二三四五六七八九十]+|[0-9]+)[、.．]\s*(?P<title>.+?)\s*$",
+        stripped,
+    )
+    if plain_heading:
+        return plain_heading.group("title").strip()
+    bracket_heading = re.match(r"^【(?P<title>.+?)】\s*$", stripped)
+    if bracket_heading:
+        return bracket_heading.group("title").strip()
+    return None
+
+
+def _is_removed_report_section_title(title: str) -> bool:
+    normalized = re.sub(r"\s+", "", title).replace("：", ":")
+    return (
+        normalized.startswith("相关SQL及初步优化建议")
+        or normalized.startswith("附录")
+        or normalized.startswith("数据来源说明")
+    )
 
 
 def _append_missing_evidence_section(

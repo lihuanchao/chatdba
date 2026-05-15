@@ -174,6 +174,24 @@ class SparseTopSqlReportGateway:
         return "### 模型报告\n已分析。"
 
 
+class AppendixReportGateway:
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        if "FaultDiagnosisProfile" in system_prompt:
+            raise RuntimeError("use fallback profile")
+        if "根因仲裁结论" in system_prompt:
+            return "监控指标异常与 TopSQL 证据同时存在，疑似 TopSQL 导致数据库高负载。"
+        return (
+            "### 一、问题简述\n"
+            "数据库 CPU 异常。\n\n"
+            "### 四、问题分析及优化建议\n"
+            "TopSQL 分析：存在高耗时 SQL。\n\n"
+            "五、附录：数据来源说明\n"
+            "监控指标：来自业务 IP 10.186.21.61 的 CPU 使用率。\n"
+            "TopSQL：基于数据库性能采集系统。\n"
+            "CMDB 映射：通过 CMDB 将管理 IP 映射至业务 IP。\n"
+        )
+
+
 class FakeCmdbResolver:
     def resolve_by_management_ip(self, management_ip: str):
         if management_ip == "10.187.0.54":
@@ -441,3 +459,30 @@ def test_fault_report_appends_related_top_sql_when_model_report_omits_it():
     assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
     assert "### 相关 SQL 及初步优化建议" not in report.markdown
     assert "附录：关键数据摘要" not in report.markdown
+
+
+def test_fault_report_strips_plain_text_appendix_data_source_section_from_model_report():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=AppendixReportGateway(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-8",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "### 一、问题简述" in report.markdown
+    assert "### 四、问题分析及优化建议" in report.markdown
+    assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
+    assert "附录" not in report.markdown
+    assert "数据来源说明" not in report.markdown
+    assert "监控指标：来自业务 IP" not in report.markdown
+    assert "CMDB 映射" not in report.markdown
