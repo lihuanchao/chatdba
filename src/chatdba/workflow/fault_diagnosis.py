@@ -374,9 +374,6 @@ def _fallback_report(
             f"【原因概述】{root_cause}",
             "",
             "### 四、问题分析及优化建议",
-            "【故障根因】",
-            root_cause,
-            "",
             "【监控发现】",
             _metric_markdown(metrics),
             "",
@@ -527,20 +524,15 @@ def _should_include_related_top_sql(
 
 def _top_sql_initial_advice(sql: str) -> str:
     normalized = sql.lower()
-    advice = ["先执行 EXPLAIN，确认访问类型、扫描行数、是否使用临时表或 filesort。"]
-    if "select *" in normalized:
-        advice.append("避免 `select *`，只返回业务必需列，降低回表和网络传输成本。")
     if " order by " in normalized:
-        advice.append("检查排序字段是否可与过滤条件组成联合索引，减少 filesort。")
-    if " count(" in normalized:
-        advice.append("核对统计条件字段索引，必要时用覆盖索引降低扫描成本。")
+        return "执行 EXPLAIN 确认扫描行数和 filesort；优先评估 ORDER BY 与过滤条件的联合索引。"
     if " join " in normalized:
-        advice.append("检查 JOIN 条件两侧字段类型和索引是否一致，避免大表嵌套循环放大。")
+        return "执行 EXPLAIN 确认 JOIN 顺序和扫描行数；优先核对 JOIN 字段类型和索引。"
+    if " count(" in normalized:
+        return "执行 EXPLAIN 确认扫描行数；优先评估统计条件字段的覆盖索引。"
     if " where " in normalized:
-        advice.append("优先评估 WHERE 条件、JOIN 字段、ORDER BY 字段的联合索引。")
-    else:
-        advice.append("缺少过滤条件时，评估是否需要增加时间范围或业务条件限制扫描范围。")
-    return " ".join(advice)
+        return "执行 EXPLAIN 确认访问类型和扫描行数；优先评估过滤条件字段索引。"
+    return "执行 EXPLAIN 确认访问类型和扫描行数；优先补充过滤条件或限制扫描范围。"
 
 
 def _normalize_sql_text(sql: str) -> str:

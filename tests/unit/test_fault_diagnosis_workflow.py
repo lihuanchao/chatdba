@@ -210,8 +210,15 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "【相关SQL及初步优化建议】" in report.markdown
     assert "初步优化建议" in report.markdown
     assert "EXPLAIN" in report.markdown
+    assert "【故障根因】" not in report.markdown
     assert "【暴露问题】" not in report.markdown
     assert "【优化建议】" not in report.markdown
+    related_section = report.markdown.split("【相关SQL及初步优化建议】", 1)[1]
+    assert "业务" not in related_section
+    assert (
+        "初步优化建议：执行 EXPLAIN 确认扫描行数和 filesort；"
+        "优先评估 ORDER BY 与过滤条件的联合索引。"
+    ) in related_section
 
 
 def test_fault_report_limits_related_top_sql_to_two_candidates():
