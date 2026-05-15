@@ -19,6 +19,24 @@ class FakeEmbeddingGateway:
         return [0.1, 0.2, 0.3]
 
 
+class RecordingEmbeddingGateway(FakeEmbeddingGateway):
+    def __init__(self):
+        super().__init__()
+        self.operations: list[str] = []
+
+    def usage_operation(self, operation: str):
+        gateway = self
+
+        class Context:
+            def __enter__(self):
+                gateway.operations.append(operation)
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        return Context()
+
+
 def test_pgvector_case_retriever_merges_vector_hits_with_rule_candidates():
     seen = {}
     retriever = PgVectorCaseRetriever(
@@ -70,6 +88,40 @@ def test_pgvector_case_retriever_merges_vector_hits_with_rule_candidates():
 
     assert [case.case_id for case in result] == ["vector-case", "generic-case"]
     assert seen["hits"][0].vector_score == 0.98
+
+
+def test_pgvector_case_retriever_labels_embedding_usage_operation():
+    gateway = RecordingEmbeddingGateway()
+    retriever = PgVectorCaseRetriever(
+        cases=[
+            OptimizationCase(
+                case_id="vector-case",
+                db_type="mysql",
+                db_version_major="8.0",
+                sql_type="select",
+                scenario_tags=["order_by"],
+                case_card="vector case",
+                quality_score=0.9,
+            )
+        ],
+        embedding_gateway=gateway,
+        vector_search=lambda *, query, embedding, top_k: [
+            VectorSearchHit(case_id="vector-case", vector_score=0.98)
+        ],
+    )
+
+    retriever.retrieve(
+        CaseRetrievalQuery(
+            db_type="mysql",
+            db_version_major="8.0",
+            sql_type="select",
+            scenario_tags=["order_by"],
+            embedding_text="mysql select order by",
+        ),
+        limit=1,
+    )
+
+    assert gateway.operations == ["case_embedding_retrieval"]
 
 
 def test_pgvector_case_retriever_falls_back_to_rule_only_when_embedding_fails():

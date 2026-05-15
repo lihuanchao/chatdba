@@ -54,6 +54,33 @@ def test_deliver_alarm_runs_diagnosis_sends_report_and_updates_checkpoint():
     store.save.assert_called_once_with(11)
 
 
+def test_deliver_alarm_logs_lifecycle(caplog):
+    alarm = AlarmBinlogRecord(12, "数据库 CPU 高", "database_prod", "1222")
+    report = SimpleNamespace(markdown="### 一、问题简述\nCPU 高")
+    diagnosis_service = Mock()
+    diagnosis_service.run_diagnosis.return_value = SimpleNamespace(
+        task_id="fault-task-12",
+        status=TaskStatus.COMPLETED,
+        result={"report": report},
+        error=None,
+    )
+    sender = Mock()
+    store = Mock()
+
+    with caplog.at_level("INFO", logger="chatdba.alarm_binlog.service"):
+        deliver_alarm(
+            alarm=alarm,
+            diagnosis_service=diagnosis_service,
+            webhook_sender=sender,
+            checkpoint_store=store,
+        )
+
+    messages = [record.message for record in caplog.records]
+    assert any("alarm diagnosis started" in message for message in messages)
+    assert any("alarm diagnosis completed" in message for message in messages)
+    assert any("alarm webhook delivery completed" in message for message in messages)
+
+
 def test_deliver_alarm_does_not_update_checkpoint_when_diagnosis_fails():
     alarm = AlarmBinlogRecord(11, "数据库 CPU 高", "database_prod", "1222")
     diagnosis_service = Mock()

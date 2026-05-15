@@ -87,7 +87,11 @@ class PgVectorCaseRetriever:
             return []
 
         try:
-            embedding = self._embedding_gateway.embed_text(embedding_text)
+            with _usage_operation(
+                self._embedding_gateway,
+                "case_embedding_retrieval",
+            ):
+                embedding = self._embedding_gateway.embed_text(embedding_text)
         except Exception:
             LOGGER.warning("Case embedding generation failed, fallback to rule-only retrieval.", exc_info=True)
             return []
@@ -199,3 +203,18 @@ def _distance_to_score(distance: float) -> float:
 
 def _asyncpg_database_url(database_url: str) -> str:
     return database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+def _usage_operation(embedding_gateway: TextEmbeddingGateway, operation: str):
+    usage_operation = getattr(embedding_gateway, "usage_operation", None)
+    if callable(usage_operation):
+        return usage_operation(operation)
+    return _NoopUsageOperation()
+
+
+class _NoopUsageOperation:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False

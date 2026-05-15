@@ -136,6 +136,7 @@ def _build_fault_task_service() -> FaultDiagnosisTaskService:
         metric_agent=fault_runtime.metric_agent,
         cmdb_resolver=fault_runtime.cmdb_resolver,
         qwen_gateway=_build_qwen_gateway(settings),
+        task_repository=_build_task_repository(settings),
     )
 
 

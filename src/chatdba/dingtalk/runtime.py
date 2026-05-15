@@ -177,6 +177,7 @@ def build_dingtalk_runtime(
         metric_agent=fault_runtime.metric_agent,
         cmdb_resolver=fault_runtime.cmdb_resolver,
         qwen_gateway=qwen_gateway,
+        task_repository=_build_task_repository(settings),
     )
     sql_handler = DingTalkSqlOptimizationHandler(
         task_service=task_service,

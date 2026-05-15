@@ -14,6 +14,7 @@ from chatdba.config.settings import Settings
 from chatdba.fault.runtime import build_fault_diagnosis_runtime
 from chatdba.models.qwen_gateway import QwenGateway
 from chatdba.tasks.fault_service import FaultDiagnosisTaskService
+from chatdba.tasks.repository import PostgresTaskRepository
 
 
 @dataclass(frozen=True)
@@ -43,9 +44,17 @@ def build_alarm_binlog_components(config: AlarmBinlogConfig) -> AlarmBinlogCompo
             metric_agent=fault_runtime.metric_agent,
             cmdb_resolver=fault_runtime.cmdb_resolver,
             qwen_gateway=qwen_gateway,
+            task_repository=_build_task_repository(settings),
         ),
         webhook_sender=AlarmWebhookSender(config.webhook),
     )
+
+
+def _build_task_repository(settings):
+    database_url = getattr(settings, "database_url", "")
+    if not database_url:
+        return None
+    return PostgresTaskRepository(database_url)
 
 
 def main() -> None:

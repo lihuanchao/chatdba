@@ -1,4 +1,4 @@
-from chatdba.domain.models import DingTalkContext, TaskStatus
+from chatdba.domain.models import AgentTokenUsage, DingTalkContext, TaskStatus
 from chatdba.tasks.fault_service import FaultDiagnosisTaskService
 
 
@@ -77,3 +77,121 @@ def test_fault_diagnosis_task_service_converts_runner_error_to_failed_execution(
     assert execution.task_id == "fault-task-2"
     assert execution.status == TaskStatus.FAILED
     assert execution.error == "metric unavailable"
+
+
+class RecordingTaskRepository:
+    def __init__(self):
+        self.created_tasks = []
+        self.events = []
+        self.token_usages = []
+
+    def create_task(self, task_id: str, raw_sql: str, dingtalk_context=None) -> None:
+        self.created_tasks.append(
+            {
+                "task_id": task_id,
+                "raw_sql": raw_sql,
+                "dingtalk_context": dingtalk_context,
+            }
+        )
+
+    def append_event(self, event) -> None:
+        self.events.append(event)
+
+    def append_token_usage(self, usage) -> None:
+        self.token_usages.append(usage)
+
+
+def test_fault_diagnosis_task_service_records_events_and_token_usage():
+    class FakeUsageGateway:
+        def __init__(self):
+            self.started_tasks = []
+
+        def start_usage_collection(self, *, task_id: str) -> None:
+            self.started_tasks.append(task_id)
+
+        def finish_usage_collection(self):
+            return [
+                AgentTokenUsage(
+                    task_id="fault-task-usage",
+                    provider="qwen",
+                    model="qwen-plus",
+                    operation="generate_report",
+                    prompt_tokens=80,
+                    completion_tokens=40,
+                    total_tokens=120,
+                    raw_usage={
+                        "prompt_tokens": 80,
+                        "completion_tokens": 40,
+                        "total_tokens": 120,
+                    },
+                )
+            ]
+
+    def fake_runner(
+        task_payload,
+        *,
+        top_sql_agent=None,
+        metric_agent=None,
+        cmdb_resolver=None,
+        qwen_gateway=None,
+        progress_sink=None,
+    ):
+        if progress_sink:
+            progress_sink("在解析故障信息... 正在获取 TopSQL 和监控指标，请稍候...\n")
+        return {"report": "ok"}
+
+    repository = RecordingTaskRepository()
+    gateway = FakeUsageGateway()
+    service = FaultDiagnosisTaskService(
+        task_runner=fake_runner,
+        task_repository=repository,
+        qwen_gateway=gateway,
+        task_id_factory=lambda: "fault-task-usage",
+    )
+
+    execution = service.run_diagnosis(
+        input_text="订单系统 CPU 高",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.COMPLETED
+    assert gateway.started_tasks == ["fault-task-usage"]
+    assert repository.created_tasks == [
+        {
+            "task_id": "fault-task-usage",
+            "raw_sql": "订单系统 CPU 高",
+            "dingtalk_context": make_context(),
+        }
+    ]
+    assert [event.status for event in repository.events] == [
+        TaskStatus.RECEIVED,
+        TaskStatus.DIAGNOSING,
+        TaskStatus.COMPLETED,
+    ]
+    assert len(repository.token_usages) == 1
+    assert repository.token_usages[0].task_id == "fault-task-usage"
+    assert repository.token_usages[0].total_tokens == 120
+
+
+def test_fault_diagnosis_task_service_records_failed_event_on_error():
+    def failing_runner(*args, **kwargs):
+        raise RuntimeError("metric unavailable")
+
+    repository = RecordingTaskRepository()
+    service = FaultDiagnosisTaskService(
+        task_runner=failing_runner,
+        task_repository=repository,
+        task_id_factory=lambda: "fault-task-failed",
+    )
+
+    execution = service.run_diagnosis(
+        input_text="订单系统 CPU 高",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.FAILED
+    assert [event.status for event in repository.events] == [
+        TaskStatus.RECEIVED,
+        TaskStatus.FAILED,
+    ]
+    assert repository.events[-1].payload == {"error": "metric unavailable"}

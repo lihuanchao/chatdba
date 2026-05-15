@@ -59,6 +59,21 @@ def test_report_builder_creates_sql_only_report_without_qwen():
 
 def test_report_builder_uses_cases_and_qwen_json_when_available():
     class FakeQwenGateway:
+        def __init__(self):
+            self.operations = []
+
+        def usage_operation(self, operation: str):
+            gateway = self
+
+            class Context:
+                def __enter__(self):
+                    gateway.operations.append(operation)
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            return Context()
+
         def generate_report(self, system_prompt: str, user_prompt: str) -> str:
             if "SQL问题画像" in system_prompt:
                 return EMPTY_PROBLEM_PROFILE_JSON
@@ -108,8 +123,9 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
             }
             """
 
+    gateway = FakeQwenGateway()
     composer = OptimizationReportComposer(
-        qwen_gateway=FakeQwenGateway(),
+        qwen_gateway=gateway,
         cases=[
             OptimizationCase(
                 case_id="case-1",
@@ -140,6 +156,10 @@ def test_report_builder_uses_cases_and_qwen_json_when_available():
 
     assert report.summary == "Use an index to avoid filesort."
     assert report.similar_cases[0].case_id == "case-1"
+    assert gateway.operations == [
+        "sql_problem_profile",
+        "sql_optimization_report",
+    ]
 
 
 def test_report_builder_backfills_retrieved_cases_when_qwen_omits_them():

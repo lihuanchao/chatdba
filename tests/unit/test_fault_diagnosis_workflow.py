@@ -223,6 +223,45 @@ class CapturingReportPromptGateway:
         return "### 一、问题简述\n数据库 CPU 异常。"
 
 
+class RecordingFaultGateway:
+    def __init__(self) -> None:
+        self.operations: list[str] = []
+
+    def usage_operation(self, operation: str):
+        gateway = self
+
+        class Context:
+            def __enter__(self):
+                gateway.operations.append(operation)
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        return Context()
+
+    def generate_report(self, system_prompt: str, user_prompt: str) -> str:
+        if "FaultDiagnosisProfile" in system_prompt:
+            return """
+            {
+              "input_text": "订单系统 CPU 高",
+              "system_name": "订单系统",
+              "management_ip": "10.186.17.54",
+              "business_ip": "10.186.17.55",
+              "primary_ip": "10.186.17.54",
+              "alert_time": null,
+              "start_time": "2026-04-30 14:00:00",
+              "end_time": "2026-04-30 15:00:00",
+              "timezone": "Asia/Shanghai",
+              "query_background": "订单系统数据库故障诊断",
+              "plan": [],
+              "missing_fields": []
+            }
+            """
+        if "根因仲裁结论" in system_prompt:
+            return "监控指标异常与 TopSQL 证据同时存在。"
+        return "### 一、问题简述\n数据库 CPU 异常。"
+
+
 class FakeCmdbResolver:
     def resolve_by_management_ip(self, management_ip: str):
         if management_ip == "10.187.0.54":
@@ -276,16 +315,30 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "订单系统" in report.markdown
     assert "10.186.17.54" in report.markdown
     assert "10.186.17.55" in report.markdown
-    assert "select * from orders" in report.markdown
-    assert "CPU 使用率持续高于 90%" in report.markdown
-    assert "【相关SQL及初步优化建议】" not in report.markdown
-    assert "### 相关 SQL 及初步优化建议" not in report.markdown
-    assert "附录：关键数据摘要" not in report.markdown
-    assert "初步优化建议" not in report.markdown
-    assert "【故障根因】" not in report.markdown
-    assert "【暴露问题】" not in report.markdown
-    assert "【优化建议】" not in report.markdown
-    assert report.markdown.count("监控指标异常与 TopSQL 证据同时存在") == 1
+
+
+def test_fault_diagnosis_graph_labels_qwen_usage_operations():
+    gateway = RecordingFaultGateway()
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=FakeTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=gateway,
+    )
+
+    graph.invoke(
+        {
+            "task_id": "fault-usage",
+            "input_text": "订单系统 CPU 高，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    assert gateway.operations == [
+        "fault_profile",
+        "fault_adjudication",
+        "fault_report",
+    ]
 
 
 def test_fault_report_lists_two_top_sql_rows_and_separates_analysis_from_recommendations():

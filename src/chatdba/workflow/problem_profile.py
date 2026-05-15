@@ -198,7 +198,11 @@ def build_problem_profile_with_qwen(
         ensure_ascii=False,
     )
     try:
-        payload = qwen_gateway.generate_report(load_problem_profile_prompt(), user_prompt)
+        with _usage_operation(qwen_gateway, "sql_problem_profile"):
+            payload = qwen_gateway.generate_report(
+                load_problem_profile_prompt(),
+                user_prompt,
+            )
         return sanitize_problem_profile(
             SqlProblemProfile.model_validate(json.loads(payload))
         )
@@ -343,6 +347,21 @@ def load_problem_profile_prompt() -> str:
     if not content:
         return DEFAULT_PROFILE_SYSTEM_PROMPT
     return content
+
+
+def _usage_operation(qwen_gateway: ProblemProfileGateway, operation: str):
+    usage_operation = getattr(qwen_gateway, "usage_operation", None)
+    if callable(usage_operation):
+        return usage_operation(operation)
+    return _NoopUsageOperation()
+
+
+class _NoopUsageOperation:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def _db_type_for(evidence: EvidenceEnvelope) -> str:

@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from contextlib import contextmanager
 import threading
 
 from openai import OpenAI
@@ -26,7 +27,17 @@ class QwenGateway:
         records = list(getattr(self._usage_local, "records", []))
         self._usage_local.records = []
         self._usage_local.task_id = None
+        self._usage_local.operation = None
         return records
+
+    @contextmanager
+    def usage_operation(self, operation: str):
+        previous = getattr(self._usage_local, "operation", None)
+        self._usage_local.operation = operation
+        try:
+            yield
+        finally:
+            self._usage_local.operation = previous
 
     def stream_report(self, system_prompt: str, user_prompt: str) -> Iterator[str]:
         response = self._client.chat.completions.create(
@@ -47,7 +58,7 @@ class QwenGateway:
                 yield content
         self._record_usage(
             model=self._model,
-            operation="stream_report",
+            operation=self._current_operation("stream_report"),
             usage=usage,
         )
 
@@ -62,7 +73,7 @@ class QwenGateway:
         )
         self._record_usage(
             model=self._model,
-            operation="generate_report",
+            operation=self._current_operation("generate_report"),
             usage=getattr(response, "usage", None),
         )
         return str(response.choices[0].message.content)
@@ -76,10 +87,16 @@ class QwenGateway:
         )
         self._record_usage(
             model=self._embedding_model,
-            operation="embed_text",
+            operation=self._current_operation("embed_text"),
             usage=getattr(response, "usage", None),
         )
         return [float(value) for value in response.data[0].embedding]
+
+    def _current_operation(self, fallback: str) -> str:
+        operation = getattr(self._usage_local, "operation", None)
+        if not operation:
+            return fallback
+        return str(operation)
 
     def _record_usage(
         self,

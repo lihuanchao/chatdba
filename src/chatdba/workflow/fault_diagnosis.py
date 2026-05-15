@@ -261,10 +261,11 @@ def _profile_with_qwen(
         ensure_ascii=False,
     )
     try:
-        payload = qwen_gateway.generate_report(
-            "你是数据库故障诊断调度专家，请只返回 FaultDiagnosisProfile JSON。",
-            user_prompt,
-        )
+        with _usage_operation(qwen_gateway, "fault_profile"):
+            payload = qwen_gateway.generate_report(
+                "你是数据库故障诊断调度专家，请只返回 FaultDiagnosisProfile JSON。",
+                user_prompt,
+            )
         profile = FaultDiagnosisProfile.model_validate(json.loads(payload))
         return _merge_profile_cmdb_fields(profile, fallback)
     except Exception:
@@ -289,10 +290,11 @@ def _adjudicate(
         ensure_ascii=False,
     )
     try:
-        adjudication = qwen_gateway.generate_report(
-            "你是数据库值班长，请基于证据输出中文根因仲裁结论，禁止编造数据。",
-            user_prompt,
-        ).strip()
+        with _usage_operation(qwen_gateway, "fault_adjudication"):
+            adjudication = qwen_gateway.generate_report(
+                "你是数据库值班长，请基于证据输出中文根因仲裁结论，禁止编造数据。",
+                user_prompt,
+            ).strip()
     except Exception:
         return _fallback_adjudication(top_sql=top_sql, metrics=metrics)
     return adjudication or _fallback_adjudication(top_sql=top_sql, metrics=metrics)
@@ -344,10 +346,11 @@ def _build_report(
         ensure_ascii=False,
     )
     try:
-        markdown = qwen_gateway.generate_report(
-            FAULT_REPORT_SYSTEM_PROMPT,
-            user_prompt,
-        ).strip()
+        with _usage_operation(qwen_gateway, "fault_report"):
+            markdown = qwen_gateway.generate_report(
+                FAULT_REPORT_SYSTEM_PROMPT,
+                user_prompt,
+            ).strip()
     except Exception:
         return fallback
     if not markdown:
@@ -771,3 +774,18 @@ def _query_background(
 
 def _format_time(value: datetime) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _usage_operation(qwen_gateway: FaultDiagnosisGateway, operation: str):
+    usage_operation = getattr(qwen_gateway, "usage_operation", None)
+    if callable(usage_operation):
+        return usage_operation(operation)
+    return _NoopUsageOperation()
+
+
+class _NoopUsageOperation:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False

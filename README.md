@@ -167,6 +167,12 @@ CASE_RETRIEVAL_VECTOR_TOP_K=12
 CASE_RETRIEVAL_CANDIDATE_LIMIT=12
 ```
 
+SQL 优化 token 用量会按业务阶段记录到 `agent_token_usage.operation`：
+
+- `sql_problem_profile`：SQL 问题画像生成。
+- `case_embedding_retrieval`：历史案例向量召回 embedding。
+- `sql_optimization_report`：最终 SQL 优化报告生成。
+
 ## 智能诊断
 
 智能诊断输入示例：
@@ -188,6 +194,8 @@ CASE_RETRIEVAL_CANDIDATE_LIMIT=12
 - TopSQL 使用管理 IP 对应的数据库实例查询 `performance_schema.events_statements_summary_by_digest`。
 - 某个监控指标获取不到或 TopSQL 获取失败时，会在诊断报告中体现。
 - 当前慢 SQL 数指标配置项保留，但采集链路暂未启用。
+- 故障诊断任务会复用 SQL 优化的任务事件表和 `agent_token_usage` 表记录执行进度与 Qwen token 用量。
+- 故障诊断 token 用量会按 `fault_profile`、`fault_adjudication`、`fault_report` 三个业务阶段记录。
 
 TopSQL 查询窗口：
 
@@ -289,7 +297,15 @@ CMDB 配置：
 FAULT_CMDB_TABLE=cmd_hosts
 ```
 
-CMDB 表需要建在 `METADATA_MYSQL_DATABASE` 指向的 MySQL 库中：
+CMDB 表需要建在 `METADATA_MYSQL_DATABASE` 指向的 MySQL 库中。推荐执行 MySQL 版迁移脚本：
+
+```bash
+mysql -h "$METADATA_MYSQL_HOST" -P "$METADATA_MYSQL_PORT" \
+  -u "$METADATA_MYSQL_USER" -p"$METADATA_MYSQL_PASSWORD" \
+  "$METADATA_MYSQL_DATABASE" < migrations/mysql/001_fault_cmdb_hosts.sql
+```
+
+脚本内容等价于：
 
 ```sql
 CREATE TABLE IF NOT EXISTS cmd_hosts (
@@ -297,8 +313,9 @@ CREATE TABLE IF NOT EXISTS cmd_hosts (
   business_ip varchar(64) NOT NULL,
   system_name varchar(255) NOT NULL,
   created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+  updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_cmd_hosts_system_name (system_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
 示例数据：

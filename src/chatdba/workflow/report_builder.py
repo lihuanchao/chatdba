@@ -141,7 +141,8 @@ class OptimizationReportComposer:
             ensure_ascii=False,
         )
         try:
-            payload = self._qwen_gateway.generate_report(system_prompt, user_prompt)
+            with _usage_operation(self._qwen_gateway, "sql_optimization_report"):
+                payload = self._qwen_gateway.generate_report(system_prompt, user_prompt)
             report = OptimizationReport.model_validate(json.loads(payload))
             if not report.similar_cases and similar_cases:
                 report.similar_cases = similar_cases_for_report(
@@ -501,3 +502,18 @@ def _load_system_prompt() -> str:
     if not content:
         return DEFAULT_SYSTEM_PROMPT
     return content
+
+
+def _usage_operation(qwen_gateway: QwenReportGateway, operation: str):
+    usage_operation = getattr(qwen_gateway, "usage_operation", None)
+    if callable(usage_operation):
+        return usage_operation(operation)
+    return _NoopUsageOperation()
+
+
+class _NoopUsageOperation:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False

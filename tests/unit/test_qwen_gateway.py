@@ -116,6 +116,18 @@ def test_gateway_collects_generate_report_usage_records():
     assert records[0].total_tokens == 36
 
 
+def test_gateway_records_custom_usage_operation_for_generate_report():
+    gateway = QwenGateway(client=FakeNonStreamClient(), model="qwen-plus")
+
+    gateway.start_usage_collection(task_id="task-custom")
+    with gateway.usage_operation("sql_problem_profile"):
+        gateway.generate_report("system", "user")
+    records = gateway.finish_usage_collection()
+
+    assert len(records) == 1
+    assert records[0].operation == "sql_problem_profile"
+
+
 def test_gateway_collects_embedding_usage_records():
     gateway = QwenGateway(
         client=FakeEmbeddingClient(),
@@ -134,3 +146,19 @@ def test_gateway_collects_embedding_usage_records():
     assert records[0].prompt_tokens == 8
     assert records[0].completion_tokens == 0
     assert records[0].total_tokens == 8
+
+
+def test_gateway_records_custom_usage_operation_for_embedding():
+    gateway = QwenGateway(
+        client=FakeEmbeddingClient(),
+        model="qwen-plus",
+        embedding_model="text-embedding-v4",
+    )
+
+    gateway.start_usage_collection(task_id="task-embedding")
+    with gateway.usage_operation("case_embedding_retrieval"):
+        gateway.embed_text("mysql order by limit")
+    records = gateway.finish_usage_collection()
+
+    assert len(records) == 1
+    assert records[0].operation == "case_embedding_retrieval"
