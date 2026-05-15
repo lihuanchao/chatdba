@@ -60,6 +60,27 @@ class MultiTopSqlAgent:
                     total_execution_seconds=145.0,
                     sql_text="select * from audit_log where tenant_id = ?",
                 ),
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=42,
+                    avg_execution_seconds=2.1,
+                    total_execution_seconds=88.2,
+                    sql_text="select * from shipments where status = ?",
+                ),
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=36,
+                    avg_execution_seconds=1.8,
+                    total_execution_seconds=64.8,
+                    sql_text="select * from payments where created_at > ?",
+                ),
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=30,
+                    avg_execution_seconds=1.5,
+                    total_execution_seconds=45.0,
+                    sql_text="select * from inventory where sku = ?",
+                ),
             ],
             summary="发现多条疑似相关 TopSQL。",
         )
@@ -207,21 +228,17 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "10.186.17.55" in report.markdown
     assert "select * from orders" in report.markdown
     assert "CPU 使用率持续高于 90%" in report.markdown
-    assert "【相关SQL及初步优化建议】" in report.markdown
-    assert "初步优化建议" in report.markdown
-    assert "EXPLAIN" in report.markdown
+    assert "【相关SQL及初步优化建议】" not in report.markdown
+    assert "### 相关 SQL 及初步优化建议" not in report.markdown
+    assert "附录：关键数据摘要" not in report.markdown
+    assert "初步优化建议" not in report.markdown
     assert "【故障根因】" not in report.markdown
     assert "【暴露问题】" not in report.markdown
     assert "【优化建议】" not in report.markdown
-    related_section = report.markdown.split("【相关SQL及初步优化建议】", 1)[1]
-    assert "业务" not in related_section
-    assert (
-        "初步优化建议：执行 EXPLAIN 确认扫描行数和 filesort；"
-        "优先评估 ORDER BY 与过滤条件的联合索引。"
-    ) in related_section
+    assert report.markdown.count("监控指标异常与 TopSQL 证据同时存在") == 1
 
 
-def test_fault_report_limits_related_top_sql_to_two_candidates():
+def test_fault_report_limits_top_sql_analysis_to_five_rows_without_related_sql_section():
     graph = build_fault_diagnosis_graph(
         top_sql_agent=MultiTopSqlAgent(),
         metric_agent=FakeMetricAgent(),
@@ -236,12 +253,17 @@ def test_fault_report_limits_related_top_sql_to_two_candidates():
         }
     )
 
-    related_section = result["report"].markdown.split("【相关SQL及初步优化建议】", 1)[1]
+    markdown = result["report"].markdown
 
-    assert "最多输出 2 条" in related_section
-    assert "select * from orders where status" in related_section
-    assert "select count(*) from order_items" in related_section
-    assert "select * from audit_log" not in related_section
+    assert "【相关SQL及初步优化建议】" not in markdown
+    assert "### 相关 SQL 及初步优化建议" not in markdown
+    assert "select * from orders where status" in markdown
+    assert "select count(*) from order_items" in markdown
+    assert "select * from audit_log" in markdown
+    assert "select * from shipments" in markdown
+    assert "select * from payments" in markdown
+    assert "select * from inventory" not in markdown
+    assert "TopSQL 分析：共获取 6 条，展示前 5 条" in markdown
 
 
 def test_fault_report_formats_sql_with_backticks_as_markdown_code():
@@ -268,7 +290,7 @@ def test_fault_report_formats_sql_with_backticks_as_markdown_code():
     assert (
         "```sql\nSELECT FILE_UPLOAD_INFO_ID FROM "
         "`international-base`.sys_file_info WHERE BILL_ID = ?\n```"
-    ) in markdown
+    ) not in markdown
     assert "SQL：`SELECT FILE_UPLOAD_INFO_ID FROM `international-base`" not in markdown
 
 
@@ -345,7 +367,7 @@ def test_fault_report_shows_partial_metric_missing_details():
 
     report = result["report"]
 
-    assert "部分监控指标未获取到" in report.summary
+    assert "部分指标缺失" in report.summary
     assert "active_threads: 未返回数据" in report.markdown
     assert "未获取到的监控指标" in report.markdown
 
@@ -415,6 +437,5 @@ def test_fault_report_appends_related_top_sql_when_model_report_omits_it():
     report = result["report"]
 
     assert "### 模型报告" in report.markdown
-    assert "### 相关 SQL 及初步优化建议" in report.markdown
-    assert "select * from orders order by created_at desc limit 1000" in report.markdown
-    assert "EXPLAIN" in report.markdown
+    assert "### 相关 SQL 及初步优化建议" not in report.markdown
+    assert "附录：关键数据摘要" not in report.markdown

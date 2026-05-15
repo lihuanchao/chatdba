@@ -281,12 +281,12 @@ def _fallback_adjudication(
     metrics: MetricEvidence,
 ) -> str:
     if top_sql.status == "success" and metrics.status == "success":
-        return "监控指标异常与 TopSQL 证据同时存在，优先怀疑数据库高负载由长时间运行 SQL 或慢 SQL 引发。"
+        return "监控指标异常与 TopSQL 证据同时存在，疑似 SQL 执行导致数据库高负载。"
     if top_sql.status == "success":
-        return "已发现 TopSQL 证据，但缺少监控指标佐证，建议补齐 CPU、连接数和活跃线程指标。"
+        return "存在 TopSQL 证据，但缺少监控指标佐证。"
     if metrics.status == "success":
-        return "已发现监控指标异常，但缺少 TopSQL 证据，建议继续查询慢日志或 performance_schema。"
-    return "证据不足，当前无法确认数据库故障根因，需要补齐 TopSQL 和监控指标数据。"
+        return "存在监控指标异常，但缺少 TopSQL 证据。"
+    return "证据不足，暂无法确认根因。"
 
 
 def _build_report(
@@ -327,11 +327,7 @@ def _build_report(
         return fallback
     if not markdown:
         return fallback
-    markdown = _append_related_top_sql_section(
-        markdown=markdown,
-        top_sql=top_sql,
-        adjudication=adjudication,
-    )
+    markdown = _strip_removed_report_sections(markdown)
     markdown = _append_missing_evidence_section(
         markdown=markdown,
         top_sql=top_sql,
@@ -379,9 +375,6 @@ def _fallback_report(
             "",
             "【TopSQL发现】",
             _top_sql_markdown(top_sql),
-            "",
-            "【相关SQL及初步优化建议】",
-            _related_top_sql_markdown(top_sql=top_sql, adjudication=adjudication),
         ]
     )
     return FaultDiagnosisReport(
@@ -396,19 +389,26 @@ def _fallback_report(
     )
 
 
-def _append_related_top_sql_section(
-    *,
-    markdown: str,
-    top_sql: TopSqlEvidence,
-    adjudication: str,
-) -> str:
-    if not _should_include_related_top_sql(top_sql=top_sql, adjudication=adjudication):
-        return markdown
-    marker = "相关 SQL 及初步优化建议"
-    if marker in markdown or "相关SQL及初步优化建议" in markdown:
-        return markdown
-    section = _related_top_sql_markdown(top_sql=top_sql, adjudication=adjudication)
-    return "\n\n".join([markdown.rstrip(), f"### {marker}", section])
+def _strip_removed_report_sections(markdown: str) -> str:
+    removed_titles = (
+        "相关 SQL 及初步优化建议",
+        "相关SQL及初步优化建议",
+        "附录：关键数据摘要",
+        "附录: 关键数据摘要",
+    )
+    lines = markdown.splitlines()
+    kept: list[str] = []
+    skipping = False
+    for line in lines:
+        heading = re.match(r"^#{1,6}\s*(?P<title>.+?)\s*$", line.strip())
+        if heading:
+            title = heading.group("title")
+            skipping = any(title.startswith(removed) for removed in removed_titles)
+            if skipping:
+                continue
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept).strip()
 
 
 def _append_missing_evidence_section(
@@ -432,19 +432,16 @@ def _append_missing_evidence_section(
 def _report_summary(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:
     if top_sql.status == "success" and metrics.status == "success":
         if metrics.missing_metrics:
-            return "已获取 TopSQL 和部分监控指标，但部分监控指标未获取到，风险评估置信度中等。"
-        return "监控指标和 TopSQL 均存在有效证据，故障可能已影响数据库响应时间和吞吐。"
+            return "已获取 TopSQL 和部分监控指标，部分指标缺失。"
+        return "已获取 TopSQL 和监控指标，存在数据库性能风险。"
     if top_sql.status == "success":
-        return "已获取 TopSQL，但缺少监控指标，风险评估置信度中等。"
+        return "已获取 TopSQL，缺少监控指标。"
     if metrics.status == "success":
         top_sql_error = top_sql.error_message or "unknown"
         if metrics.missing_metrics:
-            return (
-                "TopSQL 获取失败，且部分监控指标未获取到，"
-                f"风险评估置信度中等。TopSQL错误：{top_sql_error}"
-            )
-        return f"TopSQL 获取失败，已获取监控指标，风险评估置信度中等。错误：{top_sql_error}"
-    return "证据不足，需补齐 TopSQL 和监控指标后再确认影响范围。"
+            return f"TopSQL 获取失败，部分监控指标缺失。TopSQL错误：{top_sql_error}"
+        return f"TopSQL 获取失败，已获取监控指标。错误：{top_sql_error}"
+    return "证据不足，需补齐 TopSQL 和监控指标。"
 
 
 def _metric_markdown(metrics: MetricEvidence) -> str:
@@ -472,7 +469,8 @@ def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
         "| 数据库 | 执行次数 | 平均执行时间(s) | 总执行时间(s) | SQL摘要 |",
         "| --- | ---: | ---: | ---: | --- |",
     ]
-    for record in top_sql.rows[:10]:
+    shown_count = min(len(top_sql.rows), 5)
+    for record in top_sql.rows[:shown_count]:
         sql = _normalize_sql_text(record.sql_text)
         rows.append(
             "| "
@@ -483,56 +481,8 @@ def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
             f"{_inline_code(sql)} |"
         )
     rows.append("")
-    rows.append(top_sql.summary or "已获取 TopSQL，请结合执行计划进一步优化。")
+    rows.append(f"TopSQL 分析：共获取 {len(top_sql.rows)} 条，展示前 {shown_count} 条。")
     return "\n".join(rows)
-
-
-def _related_top_sql_markdown(*, top_sql: TopSqlEvidence, adjudication: str) -> str:
-    if not _should_include_related_top_sql(top_sql=top_sql, adjudication=adjudication):
-        return "未确认 TopSQL 为主要根因，暂不输出相关 SQL。"
-    records = top_sql.rows[:2]
-    rows = []
-    if len(top_sql.rows) > 2:
-        rows.append("根因不确定或候选 SQL 较多，最多输出 2 条疑似相关 SQL。")
-        rows.append("")
-    for index, record in enumerate(records, start=1):
-        sql = _normalize_sql_text(record.sql_text)
-        rows.append(f"{index}. SQL：")
-        rows.append(_sql_code_block(sql))
-        rows.append(
-            "   证据："
-            f"数据库 `{record.database or '未知'}`，"
-            f"执行次数 {record.execution_count or 0}，"
-            f"平均执行时间 {record.avg_execution_seconds or 0:g}s，"
-            f"总执行时间 {record.total_execution_seconds or 0:g}s。"
-        )
-        rows.append(f"   初步优化建议：{_top_sql_initial_advice(sql)}")
-    return "\n".join(rows)
-
-
-def _should_include_related_top_sql(
-    *,
-    top_sql: TopSqlEvidence,
-    adjudication: str,
-) -> bool:
-    if top_sql.status != "success" or not top_sql.rows:
-        return False
-    if not adjudication:
-        return True
-    return any(keyword in adjudication for keyword in ("TopSQL", "SQL", "慢 SQL", "长时间运行"))
-
-
-def _top_sql_initial_advice(sql: str) -> str:
-    normalized = sql.lower()
-    if " order by " in normalized:
-        return "执行 EXPLAIN 确认扫描行数和 filesort；优先评估 ORDER BY 与过滤条件的联合索引。"
-    if " join " in normalized:
-        return "执行 EXPLAIN 确认 JOIN 顺序和扫描行数；优先核对 JOIN 字段类型和索引。"
-    if " count(" in normalized:
-        return "执行 EXPLAIN 确认扫描行数；优先评估统计条件字段的覆盖索引。"
-    if " where " in normalized:
-        return "执行 EXPLAIN 确认访问类型和扫描行数；优先评估过滤条件字段索引。"
-    return "执行 EXPLAIN 确认访问类型和扫描行数；优先补充过滤条件或限制扫描范围。"
 
 
 def _normalize_sql_text(sql: str) -> str:
@@ -544,13 +494,6 @@ def _inline_code(value: str) -> str:
     while fence in value:
         fence += "`"
     return f"{fence}{value}{fence}"
-
-
-def _sql_code_block(sql: str) -> str:
-    fence = "```"
-    while fence in sql:
-        fence += "`"
-    return f"{fence}sql\n{sql}\n{fence}"
 
 
 def _exposed_problem(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:
