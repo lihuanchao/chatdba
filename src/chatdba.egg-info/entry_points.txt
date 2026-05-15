@@ -1,2 +1,3 @@
 [console_scripts]
+chatdba-alarm-binlog = chatdba.alarm_binlog.runner:main
 chatdba-dingtalk = chatdba.dingtalk.runner:main

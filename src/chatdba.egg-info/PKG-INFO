@@ -13,6 +13,7 @@ Requires-Dist: pgvector>=0.3.0
 Requires-Dist: redis>=5.0.0
 Requires-Dist: sqlglot>=25.0.0
 Requires-Dist: pymysql>=1.1.0
+Requires-Dist: mysql-replication<2,>=1.0.9
 Requires-Dist: openai>=1.40.0
 Requires-Dist: dingtalk-stream>=0.24.0
 Provides-Extra: dev

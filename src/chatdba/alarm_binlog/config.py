@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from chatdba.alarm_binlog.models import (
     AlarmBinlogConfig,
     AlarmFilterSettings,
@@ -12,8 +14,17 @@ from chatdba.alarm_binlog.models import (
 )
 
 
+_PROJECT_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+
+
 class AlarmBinlogConfigError(ValueError):
     pass
+
+
+def _load_env_files(env_files: tuple[Path, ...] | None) -> None:
+    files = (Path(".env"), _PROJECT_ROOT_ENV) if env_files is None else env_files
+    for env_file in files:
+        load_dotenv(env_file, override=False)
 
 
 def _require(name: str) -> str:
@@ -30,7 +41,10 @@ def _parse_event_codes(raw: str) -> tuple[str, ...]:
     return values
 
 
-def load_alarm_binlog_config() -> AlarmBinlogConfig:
+def load_alarm_binlog_config(
+    *, env_files: tuple[Path, ...] | None = None
+) -> AlarmBinlogConfig:
+    _load_env_files(env_files)
     return AlarmBinlogConfig(
         mysql=AlarmMysqlSettings(
             host=_require("ALARM_MYSQL_HOST"),
