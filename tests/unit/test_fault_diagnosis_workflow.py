@@ -223,6 +223,7 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert metric_agent.seen_profile is profile
     assert report.task_id == "fault-1"
     assert "### 一、问题简述" in report.markdown
+    assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
     assert "订单系统" in report.markdown
     assert "10.186.17.54" in report.markdown
     assert "10.186.17.55" in report.markdown
@@ -437,5 +438,6 @@ def test_fault_report_appends_related_top_sql_when_model_report_omits_it():
     report = result["report"]
 
     assert "### 模型报告" in report.markdown
+    assert "【报告生成时间】2026-04-30 15:00:00" in report.markdown
     assert "### 相关 SQL 及初步优化建议" not in report.markdown
     assert "附录：关键数据摘要" not in report.markdown

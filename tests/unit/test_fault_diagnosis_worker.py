@@ -35,9 +35,6 @@ def test_run_fault_diagnosis_task_emits_progress_and_returns_report():
     )
 
     assert progress == [
-        "正在解析故障信息...\n",
-        "正在获取 TopSQL...\n",
-        "正在获取监控指标...\n",
         "正在生成故障诊断报告...\n",
     ]
     assert result["report"].task_id == "fault-2"

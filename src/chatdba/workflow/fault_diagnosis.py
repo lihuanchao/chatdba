@@ -109,6 +109,7 @@ def build_fault_diagnosis_graph(
             metrics=state["metrics"],
             adjudication=state["adjudication"],
             qwen_gateway=qwen_gateway,
+            generated_at=state.get("current_time"),
         )
         return {"report": report}
 
@@ -297,6 +298,7 @@ def _build_report(
     metrics: MetricEvidence,
     adjudication: str,
     qwen_gateway: FaultDiagnosisGateway | None,
+    generated_at: datetime | None = None,
 ) -> FaultDiagnosisReport:
     fallback = _fallback_report(
         task_id=task_id,
@@ -304,6 +306,7 @@ def _build_report(
         top_sql=top_sql,
         metrics=metrics,
         adjudication=adjudication,
+        generated_at=generated_at,
     )
     if qwen_gateway is None:
         return fallback
@@ -328,6 +331,10 @@ def _build_report(
     if not markdown:
         return fallback
     markdown = _strip_removed_report_sections(markdown)
+    markdown = _ensure_report_generated_time(
+        markdown=markdown,
+        generated_at=generated_at,
+    )
     markdown = _append_missing_evidence_section(
         markdown=markdown,
         top_sql=top_sql,
@@ -343,13 +350,16 @@ def _fallback_report(
     top_sql: TopSqlEvidence,
     metrics: MetricEvidence,
     adjudication: str,
+    generated_at: datetime | None = None,
 ) -> FaultDiagnosisReport:
     summary = _report_summary(top_sql=top_sql, metrics=metrics)
     root_cause = adjudication
     recommendations = _recommendations(top_sql=top_sql, metrics=metrics)
+    generated_time = _format_time(generated_at or datetime.now())
     markdown = "\n".join(
         [
             "### 一、问题简述",
+            f"【报告生成时间】{generated_time}",
             (
                 f"{profile.start_time} 到 {profile.end_time}，"
                 f"{profile.system_name or '未知系统'}"
@@ -387,6 +397,25 @@ def _fallback_report(
         top_sql=top_sql,
         metrics=metrics,
     )
+
+
+def _ensure_report_generated_time(
+    *,
+    markdown: str,
+    generated_at: datetime | None,
+) -> str:
+    generated_time = _format_time(generated_at or datetime.now())
+    generated_line = f"【报告生成时间】{generated_time}"
+    lines = [
+        line
+        for line in markdown.splitlines()
+        if not line.strip().startswith("【报告生成时间】")
+    ]
+    if not lines:
+        return generated_line
+    insert_at = 1 if lines[0].lstrip().startswith("#") else 0
+    lines.insert(insert_at, generated_line)
+    return "\n".join(lines).strip()
 
 
 def _strip_removed_report_sections(markdown: str) -> str:

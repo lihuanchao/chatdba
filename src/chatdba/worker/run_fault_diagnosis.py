@@ -19,16 +19,13 @@ def run_fault_diagnosis_task(
     qwen_gateway=None,
     progress_sink: ProgressSink | None = None,
 ) -> dict[str, object]:
-    if progress_sink:
-        progress_sink("正在解析故障信息...\n")
     graph = build_fault_diagnosis_graph(
         top_sql_agent=top_sql_agent,
         metric_agent=metric_agent,
         cmdb_resolver=cmdb_resolver,
         qwen_gateway=qwen_gateway,
     )
+    result = graph.invoke(task_payload)
     if progress_sink:
-        progress_sink("正在获取 TopSQL...\n")
-        progress_sink("正在获取监控指标...\n")
         progress_sink("正在生成故障诊断报告...\n")
-    return graph.invoke(task_payload)
+    return result

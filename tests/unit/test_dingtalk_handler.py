@@ -284,7 +284,7 @@ class SuccessfulFaultTaskService:
             }
         )
         if progress_sink:
-            progress_sink("正在获取 TopSQL...\n")
+            progress_sink("正在生成故障诊断报告...\n")
         profile = FaultDiagnosisProfile(
             input_text=input_text,
             system_name="订单系统",
@@ -667,7 +667,11 @@ def test_fault_handler_runs_diagnosis_and_streams_markdown_report():
     assert service.calls[0]["input_text"] == "订单系统 CPU 高，IP 10.186.17.54"
     assert responder.messages[0] == FAULT_DIAGNOSIS_STARTED_MESSAGE
     full_stream_text = "".join(responder.messages[1:])
-    assert "正在获取 TopSQL" in full_stream_text
+    assert "在解析故障信息..." in responder.messages[0]
+    assert "正在获取 TopSQL 和监控指标，请稍候..." in responder.messages[0]
+    assert "正在生成故障诊断报告..." in full_stream_text
+    assert "正在获取 TopSQL..." not in full_stream_text
+    assert "正在获取监控指标..." not in full_stream_text
     assert "### 一、问题简述" in full_stream_text
     assert "### 四、问题分析及优化建议" in full_stream_text
 

@@ -311,7 +311,7 @@ def test_v1_stream_routes_fault_diagnosis_prefix_to_fault_service(monkeypatch):
             seen["input_text"] = input_text
             seen["dingtalk_context"] = dingtalk_context
             if progress_sink is not None:
-                progress_sink("正在获取 TopSQL...\n")
+                progress_sink("正在生成故障诊断报告...\n")
             report = type(
                 "Report",
                 (),
@@ -345,7 +345,7 @@ def test_v1_stream_routes_fault_diagnosis_prefix_to_fault_service(monkeypatch):
     assert seen["input_text"] == "订单系统 CPU 高，IP 10.186.17.54"
     assert seen["dingtalk_context"].conversation_id == "dingtalk-graph-stream"
     assert "event: progress" in response.text
-    assert "正在获取 TopSQL" in response.text
+    assert "正在生成故障诊断报告" in response.text
     assert "event: markdown" in response.text
     assert "### 一、问题简述" in response.text
 

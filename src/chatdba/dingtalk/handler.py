@@ -41,7 +41,7 @@ FAULT_DIAGNOSIS_USAGE_MESSAGE = (
 )
 FAULT_DIAGNOSIS_STARTED_MESSAGE = (
     "## 数据库故障诊断任务已接收\n"
-    "正在获取 TopSQL 和监控指标，请稍候...\n\n"
+    "在解析故障信息... 正在获取 TopSQL 和监控指标，请稍候...\n\n"
 )
 FAULT_DIAGNOSIS_FAILED_MESSAGE_PREFIX = "数据库故障诊断任务失败："
 REPORT_STREAM_CHUNK_SIZE = 320
