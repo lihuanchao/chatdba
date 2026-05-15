@@ -65,6 +65,26 @@ class MultiTopSqlAgent:
         )
 
 
+class BacktickTopSqlAgent:
+    def analyze(self, profile):
+        return TopSqlEvidence(
+            status="success",
+            rows=[
+                TopSqlRecord(
+                    database="international-base",
+                    execution_count=10,
+                    avg_execution_seconds=2.5,
+                    total_execution_seconds=25.0,
+                    sql_text=(
+                        "SELECT FILE_UPLOAD_INFO_ID FROM "
+                        "`international-base`.sys_file_info WHERE BILL_ID = ?"
+                    ),
+                )
+            ],
+            summary="发现 1 条疑似相关 TopSQL。",
+        )
+
+
 class FakeMetricAgent:
     def __init__(self) -> None:
         self.seen_profile = None
@@ -190,6 +210,8 @@ def test_fault_diagnosis_graph_collects_top_sql_metrics_and_builds_markdown_repo
     assert "【相关SQL及初步优化建议】" in report.markdown
     assert "初步优化建议" in report.markdown
     assert "EXPLAIN" in report.markdown
+    assert "【暴露问题】" not in report.markdown
+    assert "【优化建议】" not in report.markdown
 
 
 def test_fault_report_limits_related_top_sql_to_two_candidates():
@@ -207,14 +229,40 @@ def test_fault_report_limits_related_top_sql_to_two_candidates():
         }
     )
 
-    related_section = result["report"].markdown.split("【相关SQL及初步优化建议】", 1)[
-        1
-    ].split("【暴露问题】", 1)[0]
+    related_section = result["report"].markdown.split("【相关SQL及初步优化建议】", 1)[1]
 
     assert "最多输出 2 条" in related_section
     assert "select * from orders where status" in related_section
     assert "select count(*) from order_items" in related_section
     assert "select * from audit_log" not in related_section
+
+
+def test_fault_report_formats_sql_with_backticks_as_markdown_code():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=BacktickTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-sql-code",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    markdown = result["report"].markdown
+
+    assert (
+        "``SELECT FILE_UPLOAD_INFO_ID FROM `international-base`.sys_file_info "
+        "WHERE BILL_ID = ?``"
+    ) in markdown
+    assert (
+        "```sql\nSELECT FILE_UPLOAD_INFO_ID FROM "
+        "`international-base`.sys_file_info WHERE BILL_ID = ?\n```"
+    ) in markdown
+    assert "SQL：`SELECT FILE_UPLOAD_INFO_ID FROM `international-base`" not in markdown
 
 
 def test_fault_diagnosis_uses_30_minute_window_before_alert_time():
@@ -292,7 +340,7 @@ def test_fault_report_shows_partial_metric_missing_details():
 
     assert "部分监控指标未获取到" in report.summary
     assert "active_threads: 未返回数据" in report.markdown
-    assert "补齐未获取到的监控指标" in report.markdown
+    assert "未获取到的监控指标" in report.markdown
 
 
 def test_fault_report_shows_top_sql_failure_reason():
@@ -314,7 +362,7 @@ def test_fault_report_shows_top_sql_failure_reason():
 
     assert "TopSQL 获取失败" in report.summary
     assert "performance_schema 连接超时" in report.markdown
-    assert "补齐 TopSQL 采集失败原因" in report.markdown
+    assert "未获取到有效 TopSQL" in report.markdown
 
 
 def test_fault_report_appends_missing_evidence_when_model_report_omits_it():

@@ -385,12 +385,6 @@ def _fallback_report(
             "",
             "【相关SQL及初步优化建议】",
             _related_top_sql_markdown(top_sql=top_sql, adjudication=adjudication),
-            "",
-            "【暴露问题】",
-            _exposed_problem(top_sql=top_sql, metrics=metrics),
-            "",
-            "【优化建议】",
-            "\n".join(f"{index + 1}. {item}" for index, item in enumerate(recommendations)),
         ]
     )
     return FaultDiagnosisReport(
@@ -482,14 +476,14 @@ def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
         "| --- | ---: | ---: | ---: | --- |",
     ]
     for record in top_sql.rows[:10]:
-        sql = record.sql_text.replace("\n", " ").strip()
+        sql = _normalize_sql_text(record.sql_text)
         rows.append(
             "| "
             f"{record.database or ''} | "
             f"{record.execution_count or 0} | "
             f"{record.avg_execution_seconds or 0:g} | "
             f"{record.total_execution_seconds or 0:g} | "
-            f"`{sql}` |"
+            f"{_inline_code(sql)} |"
         )
     rows.append("")
     rows.append(top_sql.summary or "已获取 TopSQL，请结合执行计划进一步优化。")
@@ -505,8 +499,9 @@ def _related_top_sql_markdown(*, top_sql: TopSqlEvidence, adjudication: str) -> 
         rows.append("根因不确定或候选 SQL 较多，最多输出 2 条疑似相关 SQL。")
         rows.append("")
     for index, record in enumerate(records, start=1):
-        sql = record.sql_text.replace("\n", " ").strip()
-        rows.append(f"{index}. SQL：`{sql}`")
+        sql = _normalize_sql_text(record.sql_text)
+        rows.append(f"{index}. SQL：")
+        rows.append(_sql_code_block(sql))
         rows.append(
             "   证据："
             f"数据库 `{record.database or '未知'}`，"
@@ -546,6 +541,24 @@ def _top_sql_initial_advice(sql: str) -> str:
     else:
         advice.append("缺少过滤条件时，评估是否需要增加时间范围或业务条件限制扫描范围。")
     return " ".join(advice)
+
+
+def _normalize_sql_text(sql: str) -> str:
+    return " ".join(sql.replace("\n", " ").split())
+
+
+def _inline_code(value: str) -> str:
+    fence = "`"
+    while fence in value:
+        fence += "`"
+    return f"{fence}{value}{fence}"
+
+
+def _sql_code_block(sql: str) -> str:
+    fence = "```"
+    while fence in sql:
+        fence += "`"
+    return f"{fence}sql\n{sql}\n{fence}"
 
 
 def _exposed_problem(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:
