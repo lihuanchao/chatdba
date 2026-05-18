@@ -132,14 +132,9 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
                 text,
             )
             if state.template_id:
-                self._stream_custom_template(
-                    state=state,
-                    content_value=state.rendered_markdown,
-                    finished=False,
-                    failed=False,
-                )
+                self._stream_markdown_increment(state=state, text=text)
             else:
-                state.card_instance.ai_streaming(markdown=text, append=True)
+                self._stream_markdown_increment(state=state, text=text)
         except Exception as exc:
             self._states.pop(message.message_id, None)
             fallback_text = state.rendered_markdown if state is not None else text
@@ -169,29 +164,39 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
 
         try:
             if state.template_id:
-                final_text = state.rendered_markdown
                 if failed:
-                    if not final_text:
-                        final_text = "SQL 优化任务失败，请查看日志后重试。"
-                    self._stream_custom_template(
-                        state=state,
-                        content_value=final_text,
-                        finished=True,
-                        failed=False,
+                    final_text = (
+                        "\n"
+                        if state.rendered_markdown
+                        else "任务失败，请查看日志后重试。"
                     )
                 else:
-                    self._stream_custom_template(
-                        state=state,
-                        content_value=final_text,
-                        finished=True,
-                        failed=False,
-                    )
+                    final_text = "\n"
+                self._stream_markdown_increment(
+                    state=state,
+                    text=final_text,
+                    finished=True,
+                    failed=False,
+                )
                 return
 
             if failed:
-                state.card_instance.ai_fail()
+                final_text = (
+                    "\n" if state.rendered_markdown else "任务失败，请查看日志后重试。"
+                )
+                self._stream_markdown_increment(
+                    state=state,
+                    text=final_text,
+                    finished=True,
+                    failed=False,
+                )
             else:
-                state.card_instance.ai_finish(markdown=state.rendered_markdown)
+                self._stream_markdown_increment(
+                    state=state,
+                    text="\n",
+                    finished=True,
+                    failed=False,
+                )
         except Exception:
             LOGGER.warning(
                 "DingTalk finish_markdown_stream failed: message_id=%s template_id=%s",
@@ -231,19 +236,19 @@ class DingTalkCardStreamingSender(DingTalkSessionWebhookSender):
             raise RuntimeError("钉钉卡片初始化失败，未获取到 card_instance_id。")
         return card_instance, "msgContent"
 
-    def _stream_custom_template(
+    def _stream_markdown_increment(
         self,
         *,
         state: _CardStreamState,
-        content_value: str,
-        finished: bool,
-        failed: bool,
+        text: str,
+        finished: bool = False,
+        failed: bool = False,
     ) -> None:
         state.card_instance.streaming(
             state.card_instance.card_instance_id,
             content_key=state.content_key,
-            content_value=content_value,
-            append=False,
+            content_value=_sanitize_stream_content(text),
+            append=True,
             finished=finished,
             failed=failed,
         )
@@ -283,6 +288,13 @@ def _append_markdown_chunk(existing: str, chunk: str) -> str:
     ):
         return f"{existing.rstrip()} {chunk.lstrip()}"
     return f"{existing}{chunk}"
+
+
+def _sanitize_stream_content(text: str) -> str:
+    cleaned = "".join(
+        char for char in text if char in "\n\r\t" or ord(char) >= 32
+    )
+    return cleaned or "\n"
 
 
 def _ends_with_progress_status(text: str) -> bool:

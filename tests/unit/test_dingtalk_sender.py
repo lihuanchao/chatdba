@@ -156,11 +156,71 @@ def test_card_streaming_sender_updates_single_card_instance():
     assert state.card_instance.callback_type == "STREAM"
     assert state.card_instance.card_template_id == "custom-template"
     assert state.card_instance.stream_calls == [
-        ("card-1", "content", "# 标题\n", False, False, False),
-        ("card-1", "content", "# 标题\n正文", False, False, False),
-        ("card-1", "content", "# 标题\n正文", False, True, False),
+        ("card-1", "content", "# 标题\n", True, False, False),
+        ("card-1", "content", "正文", True, False, False),
+        ("card-1", "content", "\n", True, True, False),
     ]
     assert "msg-1" not in sender._states
+
+
+def test_card_streaming_sender_streams_incremental_chunks_to_avoid_invalid_long_content():
+    class FakeChatbotMessage:
+        @classmethod
+        def from_dict(cls, data):
+            return SimpleNamespace(data=data)
+
+    class FakeCardInstance:
+        def __init__(self, dingtalk_client, incoming_message):
+            self.card_instance_id = "card-long"
+            self.stream_calls = []
+
+        def set_title_and_logo(self, title, logo):
+            return None
+
+        def create_and_send_card(self, template_id, card_data, callback_type="STREAM"):
+            return "card-long"
+
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+
+    sender = DingTalkCardStreamingSender(
+        dingtalk_client=object(),
+        chatbot_message_cls=FakeChatbotMessage,
+        card_instance_cls=FakeCardInstance,
+        default_card_template_id="env-template",
+    )
+    message = DingTalkInboundMessage(
+        message_id="msg-long",
+        conversation_id="conv-1",
+        sender_id="user-1",
+        text="故障诊断 CPU 高",
+        session_webhook="https://example.test/webhook",
+        callback_data={"msgId": "msg-long", "conversationId": "conv-1"},
+    )
+
+    first_chunk = "一" * 320
+    second_chunk = "二" * 320
+    sender.send_markdown_chunk(message=message, text=first_chunk)
+    sender.send_markdown_chunk(message=message, text=second_chunk)
+    state = sender._states["msg-long"]
+    sender.finish_markdown_stream(message=message, failed=False)
+
+    assert state.rendered_markdown == first_chunk + second_chunk
+    assert state.card_instance.stream_calls == [
+        ("card-long", "content", first_chunk, True, False, False),
+        ("card-long", "content", second_chunk, True, False, False),
+        ("card-long", "content", "\n", True, True, False),
+    ]
 
 
 def test_card_streaming_sender_preserves_custom_template_content_on_failed_finish():
@@ -215,8 +275,8 @@ def test_card_streaming_sender_preserves_custom_template_content_on_failed_finis
     assert state.card_instance.stream_calls[-1] == (
         "card-schema",
         "content",
-        "请补充数据库库名",
-        False,
+        "\n",
+        True,
         True,
         False,
     )
@@ -274,11 +334,12 @@ def test_card_streaming_sender_separates_custom_template_chunks_with_paragraph_b
     assert state.card_instance.stream_calls[-1] == (
         "card-progress",
         "content",
-        "已生成诊断结论... 已生成优化报告...\n",
-        False,
+        "已生成优化报告...\n",
+        True,
         False,
         False,
     )
+    assert state.rendered_markdown == "已生成诊断结论... 已生成优化报告...\n"
 
 
 def test_card_streaming_sender_falls_back_to_session_webhook_when_no_callback_data():
@@ -375,7 +436,7 @@ def test_card_streaming_sender_uses_default_template_id_when_message_has_no_over
     assert sender._states["msg-3"].card_instance.created_payload == {"content": ""}
     assert sender._states["msg-3"].card_instance.callback_type == "STREAM"
     assert sender._states["msg-3"].card_instance.stream_calls == [
-        ("card-2", "content", "hello", False, False, False)
+        ("card-2", "content", "hello", True, False, False)
     ]
 
 
@@ -401,6 +462,19 @@ def test_card_streaming_sender_uses_streaming_api_when_no_template_id():
         def ai_streaming(self, markdown, append=False):
             self.stream_calls.append((markdown, append))
 
+        def streaming(
+            self,
+            card_instance_id,
+            content_key,
+            content_value,
+            append,
+            finished,
+            failed,
+        ):
+            self.stream_calls.append(
+                (card_instance_id, content_key, content_value, append, finished, failed)
+            )
+
         def put_card_data(self, card_instance_id, card_data):
             self.put_calls.append((card_instance_id, card_data))
             return {"ok": True}
@@ -424,7 +498,9 @@ def test_card_streaming_sender_uses_streaming_api_when_no_template_id():
 
     sender.send_markdown_chunk(message=message, text="hello")
 
-    assert sender._states["msg-4"].card_instance.stream_calls == [("hello", True)]
+    assert sender._states["msg-4"].card_instance.stream_calls == [
+        ("card-4", "msgContent", "hello", True, False, False)
+    ]
     assert sender._states["msg-4"].card_instance.put_calls == []
 
 
@@ -593,7 +669,7 @@ def test_card_streaming_sender_prefers_custom_field_in_streaming_payload():
         "card-6",
         "wrongField",
         "hello",
-        False,
+        True,
         False,
         False,
     )

@@ -42,7 +42,7 @@ WHERE
 GROUP BY
     `a`.`checksum`
 ORDER BY
-    sum(`b`.`Query_time_sum`) DESC
+    sum( b.ts_cnt) desc ,sum(`b`.`Query_time_sum`) DESC
 LIMIT %s
 """.strip()
 
