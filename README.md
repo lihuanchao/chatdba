@@ -29,7 +29,8 @@ scripts                         本地检查和案例向量回填脚本
 - PostgreSQL 16，建议安装 pgvector 扩展
 - Redis 7
 - MySQL 元数据库，用于 `table_routes`、`db_instances`、`cmd_hosts`
-- 目标业务 MySQL，用于采集 `SHOW CREATE TABLE`、`EXPLAIN FORMAT=JSON` 和 TopSQL
+- 目标业务 MySQL，用于 SQL 优化采集 `SHOW CREATE TABLE` 和 `EXPLAIN FORMAT=JSON`
+- 统一慢日志 MySQL，用于智能诊断采集 TopSQL
 - Prometheus MCP Server，HTTP API 作为兜底可选
 - 钉钉 Stream 机器人和钉钉群机器人 webhook
 
@@ -191,7 +192,7 @@ SQL 优化 token 用量会按业务阶段记录到 `agent_token_usage.operation`
 - 使用管理 IP 到 CMDB 表查询业务 IP 和系统名称。
 - CPU 使用率使用业务 IP 查询。
 - 活跃线程数使用管理 IP 查询。
-- TopSQL 使用管理 IP 对应的数据库实例查询 `performance_schema.events_statements_summary_by_digest`。
+- TopSQL 连接统一慢日志库，使用告警管理 IP 作为 `db_resource.host` 过滤条件。
 - 某个监控指标获取不到或 TopSQL 获取失败时，会在诊断报告中体现。
 - 当前慢 SQL 数指标配置项保留，但采集链路暂未启用。
 - 故障诊断任务会复用 SQL 优化的任务事件表和 `agent_token_usage` 表记录执行进度与 Qwen token 用量。
@@ -208,31 +209,45 @@ TopSQL 来源 SQL：
 
 ```sql
 SELECT
-    SCHEMA_NAME as `数据库名`,
-    DIGEST_TEXT as `SQL语句摘要`,
-    COUNT_STAR as `执行次数`,
-    ROUND(AVG_TIMER_WAIT/1000000000000, 4) as `平均执行时间(秒)`,
-    ROUND(SUM_TIMER_WAIT/1000000000000, 4) as `总执行时间(秒)`
-FROM performance_schema.events_statements_summary_by_digest
-WHERE SCHEMA_NAME IS NOT NULL
-  AND SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
-  AND DIGEST_TEXT IS NOT NULL
-  AND LAST_SEEN > %s
-  AND LAST_SEEN < %s
-ORDER BY AVG_TIMER_WAIT DESC
+a.sample `SQL语句`,
+    `b`.`db_max` AS `数据库名`,
+    sum(b.ts_cnt) `执行次数`,
+    sum(b.Query_time_sum) / sum(b.ts_cnt) `平均执行时间(秒)`,
+    sum(`b`.`Query_time_sum`) `总执行时间(秒)`
+FROM
+    monitor_mysql_slow_query_review_rt a
+    left JOIN `monitor_mysql_slow_query_review_history_rt` b ON `a`.`checksum` = `b`.`checksum`
+    left JOIN `db_resource` c ON `b`.`resid_max` = `c`.`res_id`
+WHERE
+    `c`.`host` IS NOT NULL
+    AND `c`.`port` IS NOT NULL
+    AND c.is_delete != 1
+    AND ((b.ts_min >= %s AND b.ts_max <= %s))
+    AND `a`.`sample` != 'commit'
+    AND (`b`.`db_max` != 'information_schema' OR `b`.`db_max` IS NULL)
+    AND `b`.`user_max` IS NOT NULL
+    AND c.user_id = 100011
+    AND c.host = %s
+GROUP BY
+    `a`.`checksum`
+ORDER BY
+    sum(`b`.`Query_time_sum`) DESC
 LIMIT %s;
 ```
 
 TopSQL 配置：
 
 ```env
+FAULT_TOP_SQL_HOST=10.186.0.27
 FAULT_TOP_SQL_USER=
 FAULT_TOP_SQL_PASSWORD=
-FAULT_TOP_SQL_PORT=8801
+FAULT_TOP_SQL_PORT=8934
 FAULT_TOP_SQL_DATABASE=performance_schema
 FAULT_TOP_SQL_MIN_RUNNING_SECONDS=10
 FAULT_TOP_SQL_LIMIT=10
 ```
+
+`FAULT_TOP_SQL_DATABASE` 需要填写统一慢日志库中包含 `monitor_mysql_slow_query_review_rt`、`monitor_mysql_slow_query_review_history_rt` 和 `db_resource` 的数据库名。
 
 ## 监控指标
 
@@ -443,8 +458,11 @@ METADATA_MYSQL_HOST=
 METADATA_MYSQL_USER=
 METADATA_MYSQL_PASSWORD=
 METADATA_MYSQL_DATABASE=
+FAULT_TOP_SQL_HOST=10.186.0.27
 FAULT_TOP_SQL_USER=
 FAULT_TOP_SQL_PASSWORD=
+FAULT_TOP_SQL_PORT=8934
+FAULT_TOP_SQL_DATABASE=
 FAULT_PROMETHEUS_MCP_SSE_URL=http://prometheus-mcp-host:8080/sse
 ALARM_MYSQL_HOST=
 ALARM_MYSQL_USER=

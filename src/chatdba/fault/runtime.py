@@ -24,9 +24,10 @@ def build_fault_diagnosis_runtime(
 ) -> FaultDiagnosisRuntime:
     pymysql_runtime = _load_pymysql_runtime(settings, pymysql_module)
     top_sql_agent = MysqlTopSqlAgent(
+        host=getattr(settings, "fault_top_sql_host", "10.186.0.27"),
         username=getattr(settings, "fault_top_sql_user", ""),
         password=getattr(settings, "fault_top_sql_password", ""),
-        port=int(getattr(settings, "fault_top_sql_port", 8801)),
+        port=int(getattr(settings, "fault_top_sql_port", 8934)),
         database=getattr(settings, "fault_top_sql_database", "performance_schema"),
         connect_timeout_seconds=int(getattr(settings, "mysql_connect_timeout_seconds", 3)),
         query_timeout_seconds=int(getattr(settings, "mysql_query_timeout_seconds", 8)),
@@ -62,7 +63,8 @@ def build_fault_diagnosis_runtime(
 
 def _load_pymysql_runtime(settings, pymysql_module: Any | None) -> dict[str, Any | None]:
     if not (
-        getattr(settings, "fault_top_sql_user", "")
+        getattr(settings, "fault_top_sql_host", "")
+        and getattr(settings, "fault_top_sql_user", "")
         and getattr(settings, "fault_top_sql_password", "")
     ):
         return {"connect": None, "cursorclass": None}

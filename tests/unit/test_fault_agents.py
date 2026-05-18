@@ -33,7 +33,7 @@ class RecordingMysqlClient:
         return [
             {
                 "数据库名": "orders",
-                "SQL语句摘要": "select * from orders where status = ?",
+                "SQL语句": "select * from orders where status = ?",
                 "执行次数": 12,
                 "平均执行时间(秒)": 3.42,
                 "总执行时间(秒)": 41.04,
@@ -41,7 +41,7 @@ class RecordingMysqlClient:
         ]
 
 
-def test_mysql_top_sql_agent_queries_digest_summary_for_alert_window():
+def test_mysql_top_sql_agent_queries_slow_log_summary_for_alert_window_and_management_ip():
     client = RecordingMysqlClient()
     agent = MysqlTopSqlAgent(mysql_client=client, min_running_seconds=10, limit=10)
 
@@ -54,11 +54,21 @@ def test_mysql_top_sql_agent_queries_digest_summary_for_alert_window():
     assert evidence.rows[0].total_execution_seconds == 41.04
     assert evidence.rows[0].sql_text == "select * from orders where status = ?"
     sql, params = client.calls[0]
-    assert "performance_schema.events_statements_summary_by_digest" in sql
-    assert "LAST_SEEN > %s" in sql
-    assert "LAST_SEEN < %s" in sql
-    assert "ORDER BY AVG_TIMER_WAIT DESC" in sql
-    assert params == ["2026-04-30 14:30:00", "2026-04-30 15:00:00", 10]
+    assert "monitor_mysql_slow_query_review_rt a" in sql
+    assert "`monitor_mysql_slow_query_review_history_rt` b" in sql
+    assert "`db_resource` c" in sql
+    assert "b.ts_min >= %s" in sql
+    assert "b.ts_max <= %s" in sql
+    assert "c.user_id = 100011" in sql
+    assert "c.host = %s" in sql
+    assert "ORDER BY" in sql
+    assert "sum(`b`.`Query_time_sum`) DESC" in sql
+    assert params == [
+        "2026-04-30 14:30:00",
+        "2026-04-30 15:00:00",
+        "10.186.17.54",
+        10,
+    ]
 
 
 class RecordingPrometheusClient:

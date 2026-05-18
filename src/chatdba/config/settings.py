@@ -37,9 +37,10 @@ class Settings(BaseSettings):
     metadata_mysql_database: str = ""
     metadata_route_table: str = "table_routes"
     metadata_instance_table: str = "db_instances"
+    fault_top_sql_host: str = "10.186.0.27"
     fault_top_sql_user: str = ""
     fault_top_sql_password: str = Field(default="", repr=False)
-    fault_top_sql_port: int = 8801
+    fault_top_sql_port: int = 8934
     fault_top_sql_database: str = "performance_schema"
     fault_top_sql_min_running_seconds: int = 10
     fault_top_sql_limit: int = 10

@@ -20,18 +20,29 @@ from chatdba.domain.fault_diagnosis import (
 
 TOP_SQL_QUERY = """
 SELECT
-    SCHEMA_NAME as `数据库名`,
-    DIGEST_TEXT as `SQL语句摘要`,
-    COUNT_STAR as `执行次数`,
-    ROUND(AVG_TIMER_WAIT/1000000000000, 4) as `平均执行时间(秒)`,
-    ROUND(SUM_TIMER_WAIT/1000000000000, 4) as `总执行时间(秒)`
-FROM performance_schema.events_statements_summary_by_digest
-WHERE SCHEMA_NAME IS NOT NULL
-  AND SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
-  AND DIGEST_TEXT IS NOT NULL
-  AND LAST_SEEN > %s
-  AND LAST_SEEN < %s
-ORDER BY AVG_TIMER_WAIT DESC
+a.sample `SQL语句`,
+    `b`.`db_max` AS `数据库名`,
+    sum(b.ts_cnt) `执行次数`,
+    sum(b.Query_time_sum) / sum(b.ts_cnt) `平均执行时间(秒)`,
+    sum(`b`.`Query_time_sum`) `总执行时间(秒)`
+FROM
+    monitor_mysql_slow_query_review_rt a
+    left JOIN `monitor_mysql_slow_query_review_history_rt` b ON `a`.`checksum` = `b`.`checksum`
+    left JOIN `db_resource` c ON `b`.`resid_max` = `c`.`res_id`
+WHERE
+    `c`.`host` IS NOT NULL
+    AND `c`.`port` IS NOT NULL
+    AND c.is_delete != 1
+    AND ((b.ts_min >= %s AND b.ts_max <= %s))
+    AND `a`.`sample` != 'commit'
+    AND (`b`.`db_max` != 'information_schema' OR `b`.`db_max` IS NULL)
+    AND `b`.`user_max` IS NOT NULL
+    AND c.user_id = 100011
+    AND c.host = %s
+GROUP BY
+    `a`.`checksum`
+ORDER BY
+    sum(`b`.`Query_time_sum`) DESC
 LIMIT %s
 """.strip()
 
@@ -235,9 +246,10 @@ class MysqlTopSqlAgent:
         self,
         *,
         mysql_client: MysqlQueryClient | None = None,
+        host: str = "10.186.0.27",
         username: str = "",
         password: str = "",
-        port: int = 8801,
+        port: int = 8934,
         database: str = "performance_schema",
         connect_timeout_seconds: int = 3,
         query_timeout_seconds: int = 8,
@@ -247,6 +259,7 @@ class MysqlTopSqlAgent:
         limit: int = 10,
     ) -> None:
         self._mysql_client = mysql_client
+        self._host = host
         self._username = username
         self._password = password
         self._port = port
@@ -259,11 +272,18 @@ class MysqlTopSqlAgent:
         self._limit = limit
 
     def analyze(self, profile: FaultDiagnosisProfile) -> TopSqlEvidence:
-        if not profile.primary_ip and self._mysql_client is None:
+        management_ip = profile.management_ip or profile.primary_ip
+        if not management_ip:
             return TopSqlEvidence(
                 status="failure",
                 rows=[],
                 error_message="缺少数据库管理 IP，无法查询 TopSQL。",
+            )
+        if not self._host and self._mysql_client is None:
+            return TopSqlEvidence(
+                status="failure",
+                rows=[],
+                error_message="缺少 TopSQL 慢日志库地址，无法查询 TopSQL。",
             )
         if self._mysql_client is None and (
             not self._username or not self._connection_factory
@@ -278,7 +298,7 @@ class MysqlTopSqlAgent:
             ts_min, ts_max = _top_sql_time_bounds(profile)
             rows = self._client_for(profile).query_all(
                 TOP_SQL_QUERY,
-                [ts_min, ts_max, self._limit],
+                [ts_min, ts_max, management_ip, self._limit],
             )
         except Exception as exc:
             return TopSqlEvidence(
@@ -291,7 +311,7 @@ class MysqlTopSqlAgent:
         return TopSqlEvidence(
             status="success",
             rows=records,
-            summary=f"获取到 {len(records)} 条告警前 30 分钟内平均执行时间最高的 TopSQL 摘要。",
+            summary=f"获取到 {len(records)} 条告警前 30 分钟内总执行时间最高的 TopSQL。",
         )
 
     def _client_for(self, profile: FaultDiagnosisProfile) -> MysqlQueryClient:
@@ -300,7 +320,7 @@ class MysqlTopSqlAgent:
         return RuntimeMysqlClient(
             connection_factory=self._connection_factory,
             config=MysqlConnectionConfig(
-                host=profile.primary_ip or "",
+                host=self._host,
                 port=self._port,
                 username=self._username,
                 password=self._password,
@@ -522,6 +542,7 @@ def _top_sql_record_from_row(row: object) -> TopSqlRecord:
         ),
         sql_text=str(
             data.get("SQL语句摘要")
+            or data.get("SQL语句")
             or data.get("DIGEST_TEXT")
             or data.get("SQL_TEXT")
             or data.get("sql_text")
