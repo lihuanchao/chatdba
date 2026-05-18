@@ -60,7 +60,7 @@ FAULT_REPORT_SYSTEM_PROMPT = """你是数据库AIOps根因分析运营专家，�
 - “### 一、问题简述”必须包含报告生成时间、故障窗口、系统名、管理 IP、业务 IP 和原始告警摘要。
 - “### 二、影响概述”只输出故障影响时间和风险评估，内容要精简。
 - “### 三、问题原因”只输出原因分类和原因概述，根因结论保持短句。
-- “### 四、问题分析”只包含“【监控发现】”和“【TopSQL发现】”两部分；TopSQL 发现最多列出 2 条 TopSQL。
+- “### 四、问题分析”只包含“【监控发现】”和“【TopSQL发现】”两部分；TopSQL 发现最多列出 2 条 TopSQL，必须输出完整 SQL，SQL 必须使用 ```sql 代码块，不要放在 Markdown 表格里，不要截断或摘要化。
 - “### 五、优化建议”必须基于列出的 TopSQL 给出初步优化建议；不确定时最多针对 2 条 TopSQL 输出建议。
 
 禁止输出任何附录、数据来源说明、关键数据摘要、证据摘要、相关 SQL 及初步优化建议、验证步骤、风险提示、任务 ID。
@@ -365,6 +365,7 @@ def _build_report(
         top_sql=top_sql,
         metrics=metrics,
     )
+    markdown = _ensure_top_sql_finding_section(markdown=markdown, top_sql=top_sql)
     return fallback.model_copy(update={"markdown": markdown})
 
 
@@ -524,6 +525,82 @@ def _append_missing_evidence_section(
     return "\n\n".join([markdown.rstrip(), marker, "\n".join(lines)])
 
 
+def _ensure_top_sql_finding_section(*, markdown: str, top_sql: TopSqlEvidence) -> str:
+    if top_sql.status != "success" or not top_sql.rows:
+        return markdown
+    expected = _top_sql_markdown(top_sql)
+    if _top_sql_finding_has_full_sql(markdown, top_sql):
+        return markdown
+    return _replace_between_markers(
+        markdown=markdown,
+        start_marker="【TopSQL发现】",
+        end_markers=("### 五、优化建议",),
+        replacement=expected,
+    )
+
+
+def _top_sql_finding_has_full_sql(
+    markdown: str,
+    top_sql: TopSqlEvidence,
+) -> bool:
+    section = _section_after_marker(
+        markdown=markdown,
+        start_marker="【TopSQL发现】",
+        end_markers=("### 五、优化建议",),
+    )
+    if not section:
+        return False
+    for record in top_sql.rows[:2]:
+        if _sql_code_block(record.sql_text) not in section:
+            return False
+    return True
+
+
+def _replace_between_markers(
+    *,
+    markdown: str,
+    start_marker: str,
+    end_markers: tuple[str, ...],
+    replacement: str,
+) -> str:
+    start_index = markdown.find(start_marker)
+    if start_index < 0:
+        return markdown
+    content_start = start_index + len(start_marker)
+    end_index = _first_marker_index(markdown, end_markers, start=content_start)
+    if end_index is None:
+        end_index = len(markdown)
+    before = markdown[:content_start].rstrip()
+    after = markdown[end_index:].lstrip()
+    return f"{before}\n{replacement.strip()}\n\n{after}".strip()
+
+
+def _section_after_marker(
+    *,
+    markdown: str,
+    start_marker: str,
+    end_markers: tuple[str, ...],
+) -> str:
+    start_index = markdown.find(start_marker)
+    if start_index < 0:
+        return ""
+    content_start = start_index + len(start_marker)
+    end_index = _first_marker_index(markdown, end_markers, start=content_start)
+    if end_index is None:
+        end_index = len(markdown)
+    return markdown[content_start:end_index].strip()
+
+
+def _first_marker_index(
+    markdown: str,
+    markers: tuple[str, ...],
+    *,
+    start: int,
+) -> int | None:
+    indexes = [index for marker in markers if (index := markdown.find(marker, start)) >= 0]
+    return min(indexes) if indexes else None
+
+
 def _report_summary(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:
     if top_sql.status == "success" and metrics.status == "success":
         if metrics.missing_metrics:
@@ -560,21 +637,18 @@ def _metric_markdown(metrics: MetricEvidence) -> str:
 def _top_sql_markdown(top_sql: TopSqlEvidence) -> str:
     if top_sql.status != "success" or not top_sql.rows:
         return f"未获取到有效 TopSQL。错误：{top_sql.error_message or 'unknown'}"
-    rows = [
-        "| 数据库 | 执行次数 | 平均执行时间(s) | 总执行时间(s) | SQL摘要 |",
-        "| --- | ---: | ---: | ---: | --- |",
-    ]
+    rows: list[str] = []
     shown_count = min(len(top_sql.rows), 2)
-    for record in top_sql.rows[:shown_count]:
-        sql = _normalize_sql_text(record.sql_text)
+    for index, record in enumerate(top_sql.rows[:shown_count], start=1):
+        rows.append(f"{index}. 数据库：{record.database or '未知'}")
         rows.append(
-            "| "
-            f"{record.database or ''} | "
-            f"{record.execution_count or 0} | "
-            f"{record.avg_execution_seconds or 0:g} | "
-            f"{record.total_execution_seconds or 0:g} | "
-            f"{_inline_code(sql)} |"
+            "   "
+            f"执行次数：{record.execution_count or 0}，"
+            f"平均执行时间(s)：{record.avg_execution_seconds or 0:g}，"
+            f"总执行时间(s)：{record.total_execution_seconds or 0:g}"
         )
+        rows.append("   SQL：")
+        rows.append(_sql_code_block(record.sql_text))
     rows.append("")
     rows.append(f"TopSQL 分析：共获取 {len(top_sql.rows)} 条，展示前 {shown_count} 条。")
     return "\n".join(rows)
@@ -612,6 +686,13 @@ def _inline_code(value: str) -> str:
     while fence in value:
         fence += "`"
     return f"{fence}{value}{fence}"
+
+
+def _sql_code_block(value: str) -> str:
+    fence = "```"
+    while fence in value:
+        fence += "`"
+    return f"{fence}sql\n{value.strip()}\n{fence}"
 
 
 def _exposed_problem(*, top_sql: TopSqlEvidence, metrics: MetricEvidence) -> str:

@@ -106,6 +106,53 @@ class BacktickTopSqlAgent:
         )
 
 
+class MultilineTopSqlAgent:
+    def analyze(self, profile):
+        return TopSqlEvidence(
+            status="success",
+            rows=[
+                TopSqlRecord(
+                    database="orders",
+                    execution_count=12,
+                    avg_execution_seconds=3.42,
+                    total_execution_seconds=41.04,
+                    sql_text=(
+                        "SELECT\n"
+                        "  order_id,\n"
+                        "  customer_id\n"
+                        "FROM orders\n"
+                        "WHERE status = 'WAIT_PAY'\n"
+                        "ORDER BY created_at DESC\n"
+                        "LIMIT 100"
+                    ),
+                )
+            ],
+            summary="发现 1 条疑似相关 TopSQL。",
+        )
+
+
+class TopSqlOmittingReportGateway:
+    def complete_json(self, system_prompt: str, user_prompt: str):
+        return None
+
+    def generate_report(self, system_prompt: str, user_prompt: str):
+        return (
+            "### 一、问题简述\n"
+            "告警摘要。\n\n"
+            "### 二、影响概述\n"
+            "风险评估。\n\n"
+            "### 三、问题原因\n"
+            "原因概述。\n\n"
+            "### 四、问题分析\n"
+            "【监控发现】\n"
+            "CPU 升高。\n\n"
+            "【TopSQL发现】\n"
+            "模型只说存在慢 SQL，但没有列出完整 SQL。\n\n"
+            "### 五、优化建议\n"
+            "优化慢 SQL。"
+        )
+
+
 class FakeMetricAgent:
     def __init__(self) -> None:
         self.seen_profile = None
@@ -373,6 +420,53 @@ def test_fault_report_lists_two_top_sql_rows_and_separates_analysis_from_recomme
     assert "执行 EXPLAIN 确认扫描行数；优先评估统计条件字段的覆盖索引" in markdown
 
 
+def test_fault_report_top_sql_finding_outputs_full_sql_code_block():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=MultilineTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-full-top-sql",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    markdown = result["report"].markdown
+
+    assert "SQL摘要" not in markdown
+    assert "```sql\nSELECT\n  order_id,\n  customer_id\nFROM orders" in markdown
+    assert "WHERE status = 'WAIT_PAY'\nORDER BY created_at DESC\nLIMIT 100\n```" in markdown
+    assert "执行次数：12" in markdown
+    assert "TopSQL 分析：共获取 1 条，展示前 1 条" in markdown
+
+
+def test_fault_report_replaces_model_top_sql_finding_when_full_sql_is_missing():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=MultilineTopSqlAgent(),
+        metric_agent=FakeMetricAgent(),
+        cmdb_resolver=FakeCmdbResolver(),
+        qwen_gateway=TopSqlOmittingReportGateway(),
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-model-full-top-sql",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    markdown = result["report"].markdown
+
+    assert "模型只说存在慢 SQL" not in markdown
+    assert "```sql\nSELECT\n  order_id,\n  customer_id\nFROM orders" in markdown
+    assert "WHERE status = 'WAIT_PAY'\nORDER BY created_at DESC\nLIMIT 100\n```" in markdown
+
+
 def test_fault_report_formats_sql_with_backticks_as_markdown_code():
     graph = build_fault_diagnosis_graph(
         top_sql_agent=BacktickTopSqlAgent(),
@@ -391,13 +485,13 @@ def test_fault_report_formats_sql_with_backticks_as_markdown_code():
     markdown = result["report"].markdown
 
     assert (
+        "```sql\nSELECT FILE_UPLOAD_INFO_ID FROM "
+        "`international-base`.sys_file_info WHERE BILL_ID = ?\n```"
+    ) in markdown
+    assert (
         "``SELECT FILE_UPLOAD_INFO_ID FROM `international-base`.sys_file_info "
         "WHERE BILL_ID = ?``"
     ) in markdown
-    assert (
-        "```sql\nSELECT FILE_UPLOAD_INFO_ID FROM "
-        "`international-base`.sys_file_info WHERE BILL_ID = ?\n```"
-    ) not in markdown
     assert "SQL：`SELECT FILE_UPLOAD_INFO_ID FROM `international-base`" not in markdown
 
 
