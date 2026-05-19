@@ -773,13 +773,13 @@ workflow:
               \n## 上下文\n请记住知识库信息，可能会对回答问题有帮助：\n{{#1769496479545.text#}}\n{{#1769496426626.result#}}\n\
               当用户提出关于服务器状态或系统问题时，获取CPU 使用率、数据库活跃线程数指标，请按以下步骤处理：\n\n1. **理解意图**：从上下文中提取用户关心的指标类型、目标主机（请区分业务IP和管理IP）、时间范围（默认最近\
               \ 10 分钟）。\n2. **构造 PromQL**：基于 Node Exporter 标准指标编写正确的 PromQL 表达式。例如：\n\
-              \   - CPU 使用率（非 idle）: `100 - (avg by(ip) (rate(node_cpu_seconds_total{mode=\"\
-              idle\", ip=\"{{ip}}\"}[10m])) * 100)`，获取CPU指标需传入业务IP\n   - 数据库活跃线程数：`query=ctg_paas_30202624250003{sysCode=\"\
+              \   - CPU 使用率（非 idle）: `round(100 * (1 - avg by(ip) (irate(node_cpu_seconds_total{mode=\"\
+              idle\",ip=\"{{ip}}\"}[5m]))), 0.01)`，获取CPU指标需传入业务IP\n   - 数据库活跃线程数：`query=ctg_paas_30202624250003{sysCode=\"\
               database_prod\",tenant_id=\"100011\",ip=\"{{ip}}\"}`,获取数据库活跃线程数需传入管理IP\n\
-              \  \n   - 如果需要范围查询请从上下文从提取起始时间，参数格式为YYYY-MM-DDThh:mm:ssZ，请注意：用户输入的时区和监控工具的时区均为东八区，请用时区转换工具转换为UTC+0时间；step默认为60s。\n\
+              \  \n   - 如果需要范围查询请从上下文从提取起始时间，参数格式为YYYY-MM-DDThh:mm:ssZ，请注意：用户输入的时区和监控工具的时区均为东八区，请用时区转换工具转换为UTC+0时间；step默认为300s。\n\
               \n3. **通过 MCP 调用工具**：\n   - 如果是范围查询请调用`execute_range_query`\n   - 参数：`{\"\
               query\": \"你的 PromQL 表达式\",\"start\":\"起始时间格式YYYY-MM-DDThh:mm:ssZ\"\
-              ,\"end\":\"终止时间格式YYYY-MM-DDThh:mm:ssZ\",\"step\":\"间隔，默认60s\"}`\n  \
+              ,\"end\":\"终止时间格式YYYY-MM-DDThh:mm:ssZ\",\"step\":\"间隔，默认300s\"}`\n  \
               \ - 使用标准 MCP指令发起调用，不要自行模拟结果。\n\n4. **解析并回答**：\n   - 若工具返回成功，将数值转换为易读格式（如\
               \ GB、百分比、MB/s）；\n   - 若返回空或错误，告知用户“未找到相关数据”或“主机可能未被监控”；\n   - 始终用中文简洁清晰地回复。\n\
               \n\U0001F4CC 注意：\n- 所有计数器（counter）类指标必须使用 `rate()` 或 `irate()`。\n- 不要编造数据，必须依赖工具返回结果。\n\

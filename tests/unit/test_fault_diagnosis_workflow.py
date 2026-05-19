@@ -194,12 +194,38 @@ class PartialMetricAgent:
         )
 
 
+class DiagnosticMetricAgent:
+    def analyze(self, profile):
+        return MetricEvidence(
+            status="failure",
+            metrics=[],
+            missing_metrics=[
+                "cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据",
+            ],
+            error_message="cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据",
+            diagnostics=[
+                "metric.cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据",
+                "cmdb.missing_mapping: 管理 IP 10.186.17.54 未匹配业务 IP",
+            ],
+        )
+
+
 class FailingTopSqlAgent:
     def analyze(self, profile):
         return TopSqlEvidence(
             status="failure",
             rows=[],
             error_message="performance_schema 连接超时",
+        )
+
+
+class DiagnosticTopSqlAgent:
+    def analyze(self, profile):
+        return TopSqlEvidence(
+            status="failure",
+            rows=[],
+            error_message="慢日志库查询成功，但未返回 TopSQL。",
+            diagnostics=["top_sql.no_records: 慢日志库查询成功，但未返回 TopSQL。"],
         )
 
 
@@ -593,6 +619,31 @@ def test_fault_report_shows_top_sql_failure_reason():
     assert "TopSQL 获取失败" in report.summary
     assert "performance_schema 连接超时" in report.markdown
     assert "未获取到有效 TopSQL" in report.markdown
+
+
+def test_fault_report_lists_structured_evidence_diagnostics():
+    graph = build_fault_diagnosis_graph(
+        top_sql_agent=DiagnosticTopSqlAgent(),
+        metric_agent=DiagnosticMetricAgent(),
+        cmdb_resolver=None,
+    )
+
+    result = graph.invoke(
+        {
+            "task_id": "fault-diagnostics",
+            "input_text": "订单系统数据库 CPU 告警，管理IP：10.186.17.54",
+            "current_time": datetime(2026, 4, 30, 15, 0, 0),
+        }
+    )
+
+    report = result["report"]
+
+    assert "### 证据采集缺口" in report.markdown
+    assert "top_sql.no_records" in report.markdown
+    assert "metric.cpu_usage" in report.markdown
+    assert "cmdb.missing_mapping" in report.markdown
+    assert "MCP 查询失败: sse timeout" in report.markdown
+    assert "HTTP 未返回数据" in report.markdown
 
 
 def test_fault_report_appends_missing_evidence_when_model_report_omits_it():

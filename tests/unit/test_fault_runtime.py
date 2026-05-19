@@ -56,7 +56,6 @@ def test_settings_expose_fault_diagnosis_data_source_options():
         database_url="postgresql://chatdba:test@localhost/chatdba",
         fault_cmdb_table="cmd_hosts",
         fault_prometheus_base_url="",
-        fault_metric_step_seconds=60,
     )
 
     assert settings.fault_top_sql_port == 8934
@@ -70,7 +69,7 @@ def test_settings_expose_fault_diagnosis_data_source_options():
     assert settings.fault_prometheus_mcp_timeout_seconds == 50
     assert settings.fault_prometheus_mcp_sse_read_timeout_seconds == 50
     assert settings.fault_prometheus_base_url == ""
-    assert settings.fault_metric_step_seconds == 60
+    assert settings.fault_metric_step_seconds == 300
 
 
 def test_build_fault_runtime_wires_mysql_and_prometheus_agents():

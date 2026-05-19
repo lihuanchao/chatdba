@@ -40,6 +40,7 @@ class TopSqlEvidence(BaseModel):
     rows: list[TopSqlRecord] = Field(default_factory=list)
     summary: str = ""
     error_message: str | None = None
+    diagnostics: list[str] = Field(default_factory=list)
 
 
 class MetricPoint(BaseModel):
@@ -61,6 +62,7 @@ class MetricEvidence(BaseModel):
     missing_metrics: list[str] = Field(default_factory=list)
     summary: str = ""
     error_message: str | None = None
+    diagnostics: list[str] = Field(default_factory=list)
 
 
 class FaultDiagnosisReport(BaseModel):

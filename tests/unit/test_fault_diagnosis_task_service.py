@@ -181,6 +181,63 @@ def test_fault_diagnosis_task_service_records_events_and_token_usage():
     assert repository.token_usages[0].total_tokens == 120
 
 
+def test_fault_diagnosis_task_service_records_evidence_diagnostics_in_completed_event():
+    def fake_runner(
+        task_payload,
+        *,
+        top_sql_agent=None,
+        metric_agent=None,
+        cmdb_resolver=None,
+        qwen_gateway=None,
+        progress_sink=None,
+    ):
+        return {
+            "profile": {
+                "missing_fields": ["business_ip"],
+            },
+            "top_sql": {
+                "status": "failure",
+                "error_message": "慢日志库查询成功，但未返回 TopSQL。",
+                "diagnostics": [
+                    "top_sql.no_records: 慢日志库查询成功，但未返回 TopSQL。"
+                ],
+            },
+            "metrics": {
+                "status": "failure",
+                "missing_metrics": [
+                    "cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据"
+                ],
+                "diagnostics": [
+                    "metric.cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据"
+                ],
+            },
+            "report": "ok",
+        }
+
+    repository = RecordingTaskRepository()
+    service = FaultDiagnosisTaskService(
+        task_runner=fake_runner,
+        task_repository=repository,
+        task_id_factory=lambda: "fault-task-diagnostics",
+    )
+
+    execution = service.run_diagnosis(
+        input_text="订单系统 CPU 高",
+        dingtalk_context=make_context(),
+    )
+
+    assert execution.status == TaskStatus.COMPLETED
+    completed_payload = repository.events[-1].payload
+    assert completed_payload["evidence_diagnostics"] == {
+        "profile_missing_fields": ["business_ip"],
+        "top_sql": ["top_sql.no_records: 慢日志库查询成功，但未返回 TopSQL。"],
+        "metrics": ["metric.cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据"],
+        "missing_metrics": ["cpu_usage: MCP 查询失败: sse timeout; HTTP 未返回数据"],
+        "top_sql_error": "慢日志库查询成功，但未返回 TopSQL。",
+        "metric_error": None,
+    }
+
+
 def test_fault_diagnosis_task_service_records_failed_event_on_error():
     def failing_runner(*args, **kwargs):
         raise RuntimeError("metric unavailable")

@@ -41,6 +41,15 @@ class RecordingMysqlClient:
         ]
 
 
+class EmptyMysqlClient:
+    def __init__(self):
+        self.calls = []
+
+    def query_all(self, sql: str, params=None):
+        self.calls.append((sql, params))
+        return []
+
+
 def test_mysql_top_sql_agent_queries_slow_log_summary_for_alert_window_and_management_ip():
     client = RecordingMysqlClient()
     agent = MysqlTopSqlAgent(mysql_client=client, min_running_seconds=10, limit=10)
@@ -69,6 +78,19 @@ def test_mysql_top_sql_agent_queries_slow_log_summary_for_alert_window_and_manag
         "10.186.17.54",
         10,
     ]
+
+
+def test_mysql_top_sql_agent_records_no_records_as_observable_evidence_gap():
+    client = EmptyMysqlClient()
+    agent = MysqlTopSqlAgent(mysql_client=client, limit=10)
+
+    evidence = agent.analyze(make_profile())
+
+    assert evidence.status == "failure"
+    assert evidence.rows == []
+    assert "慢日志库" in evidence.error_message
+    assert "未返回 TopSQL" in evidence.error_message
+    assert any("top_sql.no_records" in item for item in evidence.diagnostics)
 
 
 class RecordingPrometheusClient:
@@ -141,8 +163,8 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     assert evidence.metrics[0].ip == "10.186.17.54"
     assert [point.value for point in evidence.metrics[0].values] == [92.2, 92.2]
     assert client.calls[0]["query"] == (
-        '100 - (avg by(ip) (rate(node_cpu_seconds_total{mode="idle", '
-        'ip="10.186.17.55"}[10m])) * 100)'
+        'round(100 * (1 - avg by(ip) (irate(node_cpu_seconds_total{mode="idle",'
+        'ip="10.186.17.55"}[5m]))), 0.01)'
     )
     assert client.calls[1]["query"] == (
         'ctg_paas_30202624250003{sysCode="database_prod",'
@@ -210,6 +232,22 @@ class FailingPrometheusClient:
         raise RuntimeError("mcp unavailable")
 
 
+class EmptyPrometheusClient:
+    def __init__(self):
+        self.calls = []
+
+    def range_query(self, *, query: str, start: str, end: str, step: str):
+        self.calls.append(
+            {
+                "query": query,
+                "start": start,
+                "end": end,
+                "step": step,
+            }
+        )
+        return {"status": "success", "data": {"result": []}}
+
+
 def test_prometheus_metric_agent_prefers_mcp_when_available():
     mcp_client = RecordingPrometheusClient()
     http_client = RecordingPrometheusClient()
@@ -240,6 +278,25 @@ def test_prometheus_metric_agent_falls_back_to_http_when_mcp_fails():
     assert evidence.status == "success"
     assert len(http_client.calls) == 2
     assert evidence.metrics[0].metric_name == "cpu_usage"
+
+
+def test_prometheus_metric_agent_distinguishes_mcp_failure_http_empty_result():
+    mcp_client = FailingPrometheusClient()
+    http_client = EmptyPrometheusClient()
+    agent = PrometheusMetricAgent(
+        mcp_client=mcp_client,
+        client=http_client,
+        step_seconds=60,
+    )
+
+    evidence = agent.analyze(make_profile())
+
+    assert evidence.status == "failure"
+    assert "cpu_usage" in evidence.error_message
+    assert "MCP 查询失败: mcp unavailable" in evidence.error_message
+    assert "HTTP 未返回数据" in evidence.error_message
+    assert any("metric.cpu_usage" in item for item in evidence.diagnostics)
+    assert any("metric.active_threads" in item for item in evidence.diagnostics)
 
 
 class _FakeSseResponse:

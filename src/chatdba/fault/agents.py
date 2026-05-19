@@ -274,24 +274,30 @@ class MysqlTopSqlAgent:
     def analyze(self, profile: FaultDiagnosisProfile) -> TopSqlEvidence:
         management_ip = profile.management_ip or profile.primary_ip
         if not management_ip:
+            message = "缺少数据库管理 IP，无法查询 TopSQL。"
             return TopSqlEvidence(
                 status="failure",
                 rows=[],
-                error_message="缺少数据库管理 IP，无法查询 TopSQL。",
+                error_message=message,
+                diagnostics=[f"top_sql.missing_management_ip: {message}"],
             )
         if not self._host and self._mysql_client is None:
+            message = "缺少 TopSQL 慢日志库地址，无法查询 TopSQL。"
             return TopSqlEvidence(
                 status="failure",
                 rows=[],
-                error_message="缺少 TopSQL 慢日志库地址，无法查询 TopSQL。",
+                error_message=message,
+                diagnostics=[f"top_sql.missing_source_host: {message}"],
             )
         if self._mysql_client is None and (
             not self._username or not self._connection_factory
         ):
+            message = "TopSQL 数据源未配置连接账号或 PyMySQL 连接工厂。"
             return TopSqlEvidence(
                 status="failure",
                 rows=[],
-                error_message="TopSQL 数据源未配置连接账号或 PyMySQL 连接工厂。",
+                error_message=message,
+                diagnostics=[f"top_sql.unconfigured_source: {message}"],
             )
 
         try:
@@ -301,13 +307,26 @@ class MysqlTopSqlAgent:
                 [ts_min, ts_max, management_ip, self._limit],
             )
         except Exception as exc:
+            message = str(exc) or exc.__class__.__name__
             return TopSqlEvidence(
                 status="failure",
                 rows=[],
-                error_message=str(exc) or exc.__class__.__name__,
+                error_message=message,
+                diagnostics=[f"top_sql.query_failed: {message}"],
             )
 
         records = [_top_sql_record_from_row(row) for row in rows[: self._limit]]
+        if not records:
+            message = (
+                "慢日志库查询成功，但未返回 TopSQL；请确认告警窗口、管理 IP "
+                f"{management_ip}、db_resource 映射和慢日志采集是否有数据。"
+            )
+            return TopSqlEvidence(
+                status="failure",
+                rows=[],
+                error_message=message,
+                diagnostics=[f"top_sql.no_records: {message}"],
+            )
         return TopSqlEvidence(
             status="success",
             rows=records,
@@ -393,18 +412,24 @@ class PrometheusMetricAgent:
     def analyze(self, profile: FaultDiagnosisProfile) -> MetricEvidence:
         metric_ip = profile.business_ip
         if not metric_ip:
+            message = (
+                "缺少业务 IP，无法查询监控指标；请在 CMDB 表中维护管理 IP 到业务 IP 的映射。"
+            )
             return MetricEvidence(
                 status="failure",
                 metrics=[],
-                error_message=(
-                    "缺少业务 IP，无法查询监控指标；请在 CMDB 表中维护管理 IP 到业务 IP 的映射。"
-                ),
+                missing_metrics=[message],
+                error_message=message,
+                diagnostics=[f"cmdb.missing_mapping: {message}"],
             )
         if self._mcp_client is None and self._client is None and not self._base_url:
+            message = "Prometheus 数据源未配置。"
             return MetricEvidence(
                 status="failure",
                 metrics=[],
-                error_message="Prometheus 数据源未配置。",
+                missing_metrics=[message],
+                error_message=message,
+                diagnostics=[f"metric.unconfigured_source: {message}"],
             )
 
         start = _to_prometheus_utc(profile.start_time, profile.timezone)
@@ -412,6 +437,7 @@ class PrometheusMetricAgent:
         step = f"{self._step_seconds}s"
         errors: list[str] = []
         missing_metrics: list[str] = []
+        diagnostics: list[str] = []
         series: list[MetricSeries] = []
         for spec in self._metric_specs(profile):
             collected = self._query_metric_spec(
@@ -421,6 +447,7 @@ class PrometheusMetricAgent:
                 step=step,
                 errors=errors,
                 missing_metrics=missing_metrics,
+                diagnostics=diagnostics,
             )
             series.extend(collected)
 
@@ -431,6 +458,7 @@ class PrometheusMetricAgent:
                 missing_metrics=missing_metrics,
                 error_message=" | ".join(errors or missing_metrics)
                 or "prometheus_query_failed",
+                diagnostics=diagnostics,
             )
 
         return MetricEvidence(
@@ -439,6 +467,7 @@ class PrometheusMetricAgent:
             missing_metrics=missing_metrics,
             summary=_metric_summary(series),
             error_message=" | ".join(missing_metrics) if missing_metrics else None,
+            diagnostics=diagnostics,
         )
 
     def _metric_specs(self, profile: FaultDiagnosisProfile) -> list[dict[str, str]]:
@@ -473,10 +502,10 @@ class PrometheusMetricAgent:
         step: str,
         errors: list[str],
         missing_metrics: list[str],
+        diagnostics: list[str],
     ) -> list[MetricSeries]:
-        last_errors: list[str] = []
-        empty_result_seen = False
-        for candidate in self._clients_in_order():
+        attempts: list[str] = []
+        for source_name, candidate in self._clients_in_order():
             try:
                 payload = candidate.range_query(
                     query=spec["query"],
@@ -492,25 +521,26 @@ class PrometheusMetricAgent:
                 )
                 if result:
                     return result
-                empty_result_seen = True
+                attempts.append(f"{source_name} 未返回数据")
                 continue
             except Exception as exc:
-                last_errors.append(str(exc) or exc.__class__.__name__)
+                attempts.append(
+                    f"{source_name} 查询失败: {str(exc) or exc.__class__.__name__}"
+                )
                 continue
-        reason = "; ".join(last_errors)
-        if empty_result_seen:
-            reason = f"未返回数据{'; ' + reason if reason else ''}"
+        reason = "; ".join(attempts)
         message = f"{spec['metric_name']}: {reason or '未返回数据'}"
         errors.append(message)
         missing_metrics.append(message)
+        diagnostics.append(f"metric.{message}")
         return []
 
-    def _clients_in_order(self) -> list[PrometheusRangeClient]:
-        clients: list[PrometheusRangeClient] = []
+    def _clients_in_order(self) -> list[tuple[str, PrometheusRangeClient]]:
+        clients: list[tuple[str, PrometheusRangeClient]] = []
         if self._mcp_client is not None:
-            clients.append(self._mcp_client)
+            clients.append(("MCP", self._mcp_client))
         if self._client is not None or bool(self._base_url):
-            clients.append(self._client_for_http())
+            clients.append(("HTTP", self._client_for_http()))
         return clients
 
     def _client_for(self) -> PrometheusRangeClient:
@@ -629,8 +659,8 @@ def _metric_summary(series: list[MetricSeries]) -> str:
 
 def _cpu_usage_query(ip: str) -> str:
     return (
-        '100 - (avg by(ip) (rate(node_cpu_seconds_total{mode="idle", '
-        f'ip="{ip}"}}[10m])) * 100)'
+        'round(100 * (1 - avg by(ip) (irate(node_cpu_seconds_total{mode="idle",'
+        f'ip="{ip}"}}[5m]))), 0.01)'
     )
 
 

@@ -118,6 +118,7 @@ class FaultDiagnosisTaskService:
                         status=TaskStatus.COMPLETED,
                     ),
                     "result_keys": sorted(str(key) for key in result.keys()),
+                    "evidence_diagnostics": _evidence_diagnostics(result),
                 },
             )
         )
@@ -254,3 +255,33 @@ def _event_payload(
         "stage": stage,
         "status": status.value,
     }
+
+
+def _evidence_diagnostics(result: dict[str, object]) -> dict[str, object]:
+    profile = _mapping_value(result.get("profile"))
+    top_sql = _mapping_value(result.get("top_sql"))
+    metrics = _mapping_value(result.get("metrics"))
+    return {
+        "profile_missing_fields": _list_value(profile.get("missing_fields")),
+        "top_sql": _list_value(top_sql.get("diagnostics")),
+        "metrics": _list_value(metrics.get("diagnostics")),
+        "missing_metrics": _list_value(metrics.get("missing_metrics")),
+        "top_sql_error": top_sql.get("error_message"),
+        "metric_error": metrics.get("error_message"),
+    }
+
+
+def _mapping_value(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return value
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        payload = dump(mode="python")
+        return payload if isinstance(payload, dict) else {}
+    return {}
+
+
+def _list_value(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    return []

@@ -416,6 +416,11 @@ def _fallback_report(
             _top_sql_recommendation_markdown(top_sql),
         ]
     )
+    markdown = _append_missing_evidence_section(
+        markdown=markdown,
+        top_sql=top_sql,
+        metrics=metrics,
+    )
     return FaultDiagnosisReport(
         task_id=task_id,
         summary=summary,
@@ -517,6 +522,8 @@ def _append_missing_evidence_section(
     if top_sql.status != "success":
         lines.append(f"- TopSQL 获取失败：{top_sql.error_message or 'unknown'}")
     lines.extend(f"- 监控指标获取不完整：{item}" for item in metrics.missing_metrics)
+    lines.extend(f"- TopSQL 诊断：{item}" for item in top_sql.diagnostics)
+    lines.extend(f"- 监控诊断：{item}" for item in metrics.diagnostics)
     if not lines:
         return markdown
     marker = "### 证据采集缺口"
