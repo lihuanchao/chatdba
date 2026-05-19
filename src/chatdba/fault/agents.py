@@ -659,8 +659,8 @@ def _metric_summary(series: list[MetricSeries]) -> str:
 
 def _cpu_usage_query(ip: str) -> str:
     return (
-        'round(100 * (1 - avg by(ip) (irate(node_cpu_seconds_total{mode="idle",'
-        f'ip="{ip}"}}[5m]))), 0.01)'
+        '100 - (avg by(ip) (rate(node_cpu_seconds_total{mode="idle", '
+        f'ip="{ip}"}}[10m])) * 100)'
     )
 
 

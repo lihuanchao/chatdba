@@ -163,8 +163,8 @@ def test_prometheus_metric_agent_builds_cpu_range_query_and_parses_values():
     assert evidence.metrics[0].ip == "10.186.17.54"
     assert [point.value for point in evidence.metrics[0].values] == [92.2, 92.2]
     assert client.calls[0]["query"] == (
-        'round(100 * (1 - avg by(ip) (irate(node_cpu_seconds_total{mode="idle",'
-        'ip="10.186.17.55"}[5m]))), 0.01)'
+        '100 - (avg by(ip) (rate(node_cpu_seconds_total{mode="idle", '
+        'ip="10.186.17.55"}[10m])) * 100)'
     )
     assert client.calls[1]["query"] == (
         'ctg_paas_30202624250003{sysCode="database_prod",'
